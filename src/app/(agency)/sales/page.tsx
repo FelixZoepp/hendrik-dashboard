@@ -1,32 +1,50 @@
 import type { Metadata } from "next";
+import { createClient } from "@/lib/supabase/server";
+import { requireRole } from "@/lib/auth";
+import { SalesDashboard } from "./sales-dashboard";
+import { subDays } from "date-fns";
 
 export const metadata: Metadata = {
   title: "Sales",
 };
 
-export default function SalesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function SalesPage() {
+  await requireRole(["admin", "sales"]);
+  const supabase = await createClient();
+
+  // Default: 90 Tage
+  const since = subDays(new Date(), 90).toISOString();
+
+  const [usersRes, leadsRes, oppsRes, activitiesRes, calendlyRes] =
+    await Promise.all([
+      supabase.from("close_users").select("*"),
+      supabase
+        .from("close_leads")
+        .select("*")
+        .gte("date_created", since),
+      supabase
+        .from("close_opportunities")
+        .select("*")
+        .gte("date_created", since),
+      supabase
+        .from("close_activities")
+        .select("*")
+        .gte("date_created", since),
+      supabase
+        .from("calendly_events")
+        .select("*")
+        .gte("scheduled_at", since),
+    ]);
+
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Sales-Dashboard</h1>
-        <p className="text-muted-foreground text-sm">
-          Übersicht über Leads, Termine und Abschlüsse.
-        </p>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {["Leads neu", "Termine gebucht", "Closes", "Umsatz"].map((label) => (
-          <div
-            key={label}
-            className="rounded-lg border bg-card p-4 text-card-foreground"
-          >
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="mt-1 text-2xl font-bold font-mono">—</p>
-          </div>
-        ))}
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Daten werden nach Anbindung von Close und Calendly geladen (Phase 2).
-      </p>
-    </div>
+    <SalesDashboard
+      users={usersRes.data ?? []}
+      leads={leadsRes.data ?? []}
+      opportunities={oppsRes.data ?? []}
+      activities={activitiesRes.data ?? []}
+      calendlyEvents={calendlyRes.data ?? []}
+    />
   );
 }
