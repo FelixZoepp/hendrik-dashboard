@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyNewLead } from "@/lib/notifications";
 import type { LeadQuelle } from "@/lib/types/database";
 
 export async function POST(request: Request) {
@@ -71,6 +72,46 @@ export async function POST(request: Request) {
         payload: raw,
         error: insertError.message,
       });
+    } else {
+      // Notify client owners about the new lead
+      try {
+        const { data: owners } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("company_id", mapping.company_id)
+          .in("role", ["client_owner"]);
+
+        // Supabase Auth: get emails from auth.users via admin API
+        const ownerEmails: string[] = [];
+        if (owners && owners.length > 0) {
+          for (const owner of owners) {
+            const { data: authUser } =
+              await supabase.auth.admin.getUserById(owner.id);
+            if (authUser?.user?.email) {
+              ownerEmails.push(authUser.user.email);
+            }
+          }
+        }
+
+        // Look up company name for the email
+        const { data: company } = await supabase
+          .from("companies")
+          .select("name")
+          .eq("id", mapping.company_id)
+          .single();
+
+        if (ownerEmails.length > 0) {
+          await notifyNewLead({
+            to: ownerEmails,
+            leadName: `${vorname} ${nachname}`.trim(),
+            anliegen,
+            ort,
+            companyName: company?.name ?? "Unbekannt",
+          });
+        }
+      } catch {
+        // Notification failure must not break the webhook
+      }
     }
 
     return NextResponse.json({ ok: true });

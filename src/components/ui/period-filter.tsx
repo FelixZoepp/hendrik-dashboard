@@ -1,0 +1,49 @@
+"use client";
+
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+const PERIODS = [
+  { label: "7 Tage", value: "7" },
+  { label: "30 Tage", value: "30" },
+  { label: "90 Tage", value: "90" },
+] as const;
+
+export function PeriodFilter() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const current = searchParams.get("tage") ?? "90";
+
+  function handleChange(value: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tage", value);
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
+  return (
+    <div className="flex items-center gap-1 rounded-md border bg-muted p-0.5">
+      {PERIODS.map((p) => (
+        <Button
+          key={p.value}
+          variant={current === p.value ? "default" : "ghost"}
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={() => handleChange(p.value)}
+        >
+          {p.label}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+export function getDaysFromSearchParams(
+  searchParams: Record<string, string | string[] | undefined>
+): number {
+  const raw = searchParams.tage;
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const num = parseInt(value ?? "90", 10);
+  return [7, 30, 90].includes(num) ? num : 90;
+}

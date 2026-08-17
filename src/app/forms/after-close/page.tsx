@@ -55,6 +55,35 @@ export default function AfterCloseFormPage() {
       return;
     }
 
+    // Auto-Aktivierung: Company auf "aktiv" setzen + Projekte aus Templates erzeugen
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("company_id")
+          .eq("id", user.id)
+          .single();
+
+        if (profile?.company_id) {
+          await fetch("/api/automation/activate-company", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
+            },
+            body: JSON.stringify({ company_id: profile.company_id }),
+          });
+        }
+      }
+    } catch {
+      // Aktivierung fehlgeschlagen — Formular trotzdem als gesendet werten
+      console.error("Auto-Aktivierung fehlgeschlagen");
+    }
+
     toast.success("Formular erfolgreich gesendet!");
     router.push("/forms/after-close/danke");
   }
