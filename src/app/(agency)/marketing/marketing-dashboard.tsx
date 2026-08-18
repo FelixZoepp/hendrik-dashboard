@@ -136,15 +136,6 @@ export function MarketingDashboard({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Marketing-Dashboard
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Letzte 90 Tage — Meta Ads + Google Ads
-        </p>
-      </div>
-
       {!hasData ? (
         <div className="rounded-lg border border-dashed bg-muted/30 p-12 text-center">
           <p className="text-sm font-medium">Noch keine Ad-Daten</p>

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth";
 import { LeadDetail } from "./lead-detail";
-import type { Lead, LeadActivity } from "@/lib/types/database";
+import type { Lead, LeadActivity, Profile } from "@/lib/types/database";
 import type { Metadata } from "next";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +31,8 @@ export default async function LeadDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireRole(["admin", "client_owner", "client_member"]);
+  const profile = await requireRole(["admin", "client_owner", "client_member"]);
+  const isStaff = !profile.company_id;
 
   const supabase = await createClient();
 
@@ -48,10 +49,25 @@ export default async function LeadDetailPage({
     notFound();
   }
 
+  const lead = leadResult.data as Lead;
+
+  // Resolve assignee name
+  let assigneeName: string | null = null;
+  if (lead.assigned_to) {
+    const { data: assignee } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", lead.assigned_to)
+      .single();
+    assigneeName = (assignee as Pick<Profile, "full_name"> | null)?.full_name ?? null;
+  }
+
   return (
     <LeadDetail
-      lead={leadResult.data as Lead}
+      lead={lead}
       activities={(activitiesResult.data as LeadActivity[]) ?? []}
+      assigneeName={assigneeName}
+      isStaff={isStaff}
     />
   );
 }
