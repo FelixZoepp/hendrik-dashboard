@@ -1,21 +1,40 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   ArrowLeft,
   CheckCircle2,
   Circle,
   Loader2,
   BookOpen,
+  Plus,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "sonner";
 
+const PROJECT_STATUSES = ["backlog", "in_arbeit", "review", "live"] as const;
 const STATUS_LABELS: Record<string, string> = {
   backlog: "Backlog",
   in_arbeit: "In Arbeit",
@@ -28,16 +47,8 @@ const TASK_STATUS: Record<
   { label: string; icon: typeof Circle; color: string }
 > = {
   offen: { label: "Offen", icon: Circle, color: "text-muted-foreground" },
-  in_arbeit: {
-    label: "In Arbeit",
-    icon: Loader2,
-    color: "text-primary",
-  },
-  erledigt: {
-    label: "Erledigt",
-    icon: CheckCircle2,
-    color: "text-success",
-  },
+  in_arbeit: { label: "In Arbeit", icon: Loader2, color: "text-primary" },
+  erledigt: { label: "Erledigt", icon: CheckCircle2, color: "text-success" },
 };
 
 interface Task {
@@ -66,6 +77,11 @@ interface ProjectDetailProps {
 
 export function ProjectDetail({ project, sops }: ProjectDetailProps) {
   const router = useRouter();
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [newTaskTitel, setNewTaskTitel] = useState("");
+  const [newTaskBeschreibung, setNewTaskBeschreibung] = useState("");
+  const [addingTask, setAddingTask] = useState(false);
+
   const tasks = [...project.project_tasks].sort(
     (a, b) => a.position - b.position
   );
@@ -90,7 +106,47 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
       toast.error("Fehler beim Aktualisieren");
       return;
     }
+    router.refresh();
+  }
 
+  async function changeProjectStatus(newStatus: string) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("projects")
+      .update({ status: newStatus })
+      .eq("id", project.id);
+
+    if (error) {
+      toast.error("Status konnte nicht geändert werden");
+      return;
+    }
+    toast.success(`Projekt auf „${STATUS_LABELS[newStatus]}" gesetzt`);
+    router.refresh();
+  }
+
+  async function handleAddTask() {
+    if (!newTaskTitel.trim()) return;
+    setAddingTask(true);
+
+    const supabase = createClient();
+    const { error } = await supabase.from("project_tasks").insert({
+      project_id: project.id,
+      titel: newTaskTitel.trim(),
+      beschreibung: newTaskBeschreibung.trim() || null,
+      position: tasks.length,
+    });
+
+    if (error) {
+      toast.error("Aufgabe konnte nicht erstellt werden");
+      setAddingTask(false);
+      return;
+    }
+
+    toast.success("Aufgabe erstellt");
+    setNewTaskTitel("");
+    setNewTaskBeschreibung("");
+    setShowAddTask(false);
+    setAddingTask(false);
     router.refresh();
   }
 
@@ -112,9 +168,22 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
           </h1>
           <div className="mt-1 flex items-center gap-2">
             <Badge variant="outline">{project.typ}</Badge>
-            <Badge variant="secondary">
-              {STATUS_LABELS[project.status]}
-            </Badge>
+            {/* Projekt-Status ändern */}
+            <Select
+              value={project.status}
+              onValueChange={(v) => v && changeProjectStatus(v)}
+            >
+              <SelectTrigger className="h-6 w-auto gap-1 px-2 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROJECT_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             {project.deadline && (
               <span className="text-xs text-muted-foreground">
                 Deadline:{" "}
@@ -144,11 +213,36 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
         <p className="text-sm text-muted-foreground">{project.notizen}</p>
       )}
 
+      {project.live_url && (
+        <p className="text-sm">
+          <span className="text-muted-foreground">Live: </span>
+          <a
+            href={project.live_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            {project.live_url}
+          </a>
+        </p>
+      )}
+
       <Separator />
 
       {/* Task-Liste */}
       <div>
-        <h2 className="text-sm font-medium mb-3">Aufgaben</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium">Aufgaben</h2>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7"
+            onClick={() => setShowAddTask(true)}
+          >
+            <Plus className="mr-1.5 h-3 w-3" />
+            Aufgabe
+          </Button>
+        </div>
         {tasks.length === 0 ? (
           <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
             <p className="text-sm text-muted-foreground">
@@ -168,9 +262,7 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
                   className="flex items-start gap-3 px-3 py-2.5"
                 >
                   <button
-                    onClick={() =>
-                      toggleTaskStatus(task.id, task.status)
-                    }
+                    onClick={() => toggleTaskStatus(task.id, task.status)}
                     className={cn(
                       "mt-0.5 shrink-0 transition-colors hover:text-primary",
                       statusConfig.color
@@ -209,6 +301,45 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
           </div>
         )}
       </div>
+
+      {/* Aufgabe hinzufügen Dialog */}
+      <Dialog open={showAddTask} onOpenChange={setShowAddTask}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Neue Aufgabe</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label>Titel *</Label>
+              <Input
+                value={newTaskTitel}
+                onChange={(e) => setNewTaskTitel(e.target.value)}
+                placeholder="Was muss erledigt werden?"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Beschreibung</Label>
+              <Input
+                value={newTaskBeschreibung}
+                onChange={(e) => setNewTaskBeschreibung(e.target.value)}
+                placeholder="Details (optional)"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddTask(false)}>
+              Abbrechen
+            </Button>
+            <Button
+              onClick={handleAddTask}
+              disabled={addingTask || !newTaskTitel.trim()}
+            >
+              {addingTask ? "Wird erstellt…" : "Erstellen"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

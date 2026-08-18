@@ -152,14 +152,7 @@ export function SlaOverview({ slaData, companies }: SlaOverviewProps) {
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Reaktionszeiten</h1>
-        <p className="text-sm text-muted-foreground">
-          SLA-Übersicht und Korrelation mit Abschlussquoten
-        </p>
-      </div>
-
+    <div className="space-y-6">
       {/* Globale KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-lg border bg-card p-4">

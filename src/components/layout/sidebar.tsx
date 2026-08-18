@@ -17,6 +17,7 @@ import {
   LayoutDashboard,
   GraduationCap,
   Download,
+  Kanban,
   type LucideIcon,
 } from "lucide-react";
 
@@ -97,8 +98,14 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["client_owner", "client_member"],
   },
   {
+    label: "Projektstatus",
+    href: "/status",
+    icon: Kanban,
+    roles: ["client_owner", "client_member"],
+  },
+  {
     label: "Formulare",
-    href: "/formulare",
+    href: "/forms/after-close",
     icon: FileText,
     roles: ["client_owner"],
   },
@@ -109,13 +116,13 @@ export function Sidebar({ role }: { role: UserRole }) {
   const items = NAV_ITEMS.filter((item) => item.roles.includes(role));
 
   return (
-    <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:border-r lg:border-sidebar-border lg:bg-sidebar">
+    <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:border-r lg:border-sidebar-border lg:bg-sidebar lg:backdrop-blur-xl">
       <div className="flex h-14 items-center border-b border-sidebar-border px-4">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold">
             H
           </div>
-          <span className="text-sm font-semibold text-sidebar-foreground">
+          <span className="text-sm font-semibold text-primary">
             Hoffman Solutions
           </span>
         </Link>
@@ -131,9 +138,9 @@ export function Sidebar({ role }: { role: UserRole }) {
                 <Link
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                    "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
                     isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      ? "bg-primary/10 text-primary font-medium"
                       : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                   )}
                 >

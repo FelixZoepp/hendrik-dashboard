@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { requireRole } from "@/lib/auth";
 import { LeadsView } from "./leads-view";
-import type { Lead } from "@/lib/types/database";
+import type { Lead, Company } from "@/lib/types/database";
 
 export const metadata: Metadata = {
   title: "Leads",
@@ -17,6 +17,7 @@ export default async function LeadsPage() {
     "client_member",
   ]);
   const supabase = await createClient();
+  const isStaff = !profile.company_id;
 
   let query = supabase
     .from("leads")
@@ -28,7 +29,27 @@ export default async function LeadsPage() {
     query = query.eq("company_id", profile.company_id);
   }
 
-  const { data: leads } = await query;
+  // Staff braucht die Firmenliste für den Lead-anlegen Dialog
+  const [leadsResult, companiesResult] = await Promise.all([
+    query,
+    isStaff
+      ? supabase
+          .from("companies")
+          .select("id, name")
+          .order("name", { ascending: true })
+      : Promise.resolve({ data: null }),
+  ]);
 
-  return <LeadsView leads={(leads as Lead[]) ?? []} isStaff={!profile.company_id} />;
+  return (
+    <LeadsView
+      leads={(leadsResult.data as Lead[]) ?? []}
+      isStaff={isStaff}
+      companies={
+        isStaff
+          ? ((companiesResult.data as Pick<Company, "id" | "name">[]) ?? [])
+          : undefined
+      }
+      userCompanyId={profile.company_id}
+    />
+  );
 }

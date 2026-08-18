@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SlaBadge } from "@/components/leads/sla-badge";
 import { StatusSelect } from "@/components/leads/status-select";
 import { ActivityFeed } from "@/components/leads/activity-feed";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { LEAD_STATUS_CONFIG, LEAD_QUELLEN, formatCurrency } from "@/lib/lead-utils";
 import {
@@ -15,22 +17,34 @@ import {
   MessageCircle,
   ArrowLeft,
   HandMetal,
+  CalendarClock,
+  User,
 } from "lucide-react";
 import { toast } from "sonner";
-import { updateLeadStatus, markAsContacted, addLeadActivity } from "../actions";
+import { updateLeadStatus, markAsContacted, addLeadActivity, updateLeadDetails } from "../actions";
 import type { Lead, LeadActivity, LeadStatus, VerlustGrund, LeadActivityTyp } from "@/lib/types/database";
 
 interface LeadDetailProps {
   lead: Lead;
   activities: LeadActivity[];
+  assigneeName?: string | null;
+  isStaff?: boolean;
 }
 
-export function LeadDetail({ lead, activities }: LeadDetailProps) {
+export function LeadDetail({ lead, activities, assigneeName, isStaff }: LeadDetailProps) {
   const router = useRouter();
   const quelleLabel =
     LEAD_QUELLEN.find((q) => q.value === lead.quelle)?.label ?? lead.quelle;
   const showContactButton =
     lead.status === "neu" && !lead.first_contact_at;
+
+  // Wiedervorlage date state
+  const [wiedervorlageDate, setWiedervorlageDate] = useState(
+    lead.naechste_aktion_am
+      ? new Date(lead.naechste_aktion_am).toISOString().split("T")[0]
+      : ""
+  );
+  const [savingWiedervorlage, setSavingWiedervorlage] = useState(false);
 
   async function handleStatusChange(data: {
     status: LeadStatus;
@@ -63,6 +77,28 @@ export function LeadDetail({ lead, activities }: LeadDetailProps) {
       throw new Error(result.error);
     }
     router.refresh();
+  }
+
+  async function handleWiedervorlageChange(dateStr: string) {
+    setWiedervorlageDate(dateStr);
+    if (!dateStr) return;
+
+    setSavingWiedervorlage(true);
+    try {
+      const isoDate = new Date(dateStr + "T09:00:00").toISOString();
+      const result = await updateLeadDetails(lead.id, {
+        naechste_aktion_am: isoDate,
+      });
+      if (result?.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("Wiedervorlage gesetzt");
+        router.refresh();
+      }
+    } catch {
+      toast.error("Wiedervorlage konnte nicht gespeichert werden");
+    }
+    setSavingWiedervorlage(false);
   }
 
   return (
@@ -230,6 +266,48 @@ export function LeadDetail({ lead, activities }: LeadDetailProps) {
               </p>
             </div>
           )}
+
+          {/* Zugewiesen an */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+              <User className="h-3 w-3" />
+              Zugewiesen an
+            </p>
+            <p className="text-sm">
+              {assigneeName ?? "Nicht zugewiesen"}
+            </p>
+          </div>
+
+          {/* Wiedervorlage */}
+          <div>
+            <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
+              <CalendarClock className="h-3 w-3" />
+              Wiedervorlage
+            </p>
+            {lead.naechste_aktion_am && (
+              <p className="text-sm font-mono mb-1.5">
+                {new Date(lead.naechste_aktion_am).toLocaleDateString("de-DE", {
+                  timeZone: "Europe/Berlin",
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                })}
+              </p>
+            )}
+            {!lead.naechste_aktion_am && (
+              <p className="text-sm text-muted-foreground mb-1.5">
+                Keine Wiedervorlage gesetzt
+              </p>
+            )}
+            <Input
+              type="date"
+              value={wiedervorlageDate}
+              onChange={(e) => handleWiedervorlageChange(e.target.value)}
+              disabled={savingWiedervorlage}
+              className="h-8 w-40 text-sm"
+              min={new Date().toISOString().split("T")[0]}
+            />
+          </div>
         </div>
       </div>
 

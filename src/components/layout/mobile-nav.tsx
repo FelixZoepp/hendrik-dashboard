@@ -26,6 +26,7 @@ import {
   LayoutDashboard,
   GraduationCap,
   Download,
+  Kanban,
   type LucideIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -49,7 +50,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Leads", href: "/leads", icon: ClipboardList, roles: ["client_owner", "client_member"] },
   { label: "Akademie", href: "/akademie", icon: GraduationCap, roles: ["client_owner", "client_member"] },
   { label: "Downloads", href: "/downloads", icon: Download, roles: ["client_owner", "client_member"] },
-  { label: "Formulare", href: "/formulare", icon: FileText, roles: ["client_owner"] },
+  { label: "Projektstatus", href: "/status", icon: Kanban, roles: ["client_owner", "client_member"] },
+  { label: "Formulare", href: "/forms/after-close", icon: FileText, roles: ["client_owner"] },
 ];
 
 export function MobileNav({ role }: { role: UserRole }) {
@@ -58,7 +60,7 @@ export function MobileNav({ role }: { role: UserRole }) {
   const items = NAV_ITEMS.filter((item) => item.roles.includes(role));
 
   return (
-    <div className="flex h-14 items-center border-b border-border bg-background px-4 lg:hidden">
+    <div className="flex h-14 items-center border-b border-border bg-background/80 backdrop-blur-xl px-4 lg:hidden">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger
           render={<Button variant="ghost" size="icon" className="-ml-2" />}
@@ -66,13 +68,13 @@ export function MobileNav({ role }: { role: UserRole }) {
           <Menu className="h-5 w-5" />
           <span className="sr-only">Navigation öffnen</span>
         </SheetTrigger>
-        <SheetContent side="left" className="w-64 p-0">
+        <SheetContent side="left" className="w-64 p-0 backdrop-blur-xl">
           <SheetHeader className="border-b border-border px-4 py-3">
             <SheetTitle className="flex items-center gap-2 text-left text-sm">
-              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-xs font-bold">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold">
                 H
               </div>
-              Hoffman Solutions
+              <span className="text-primary font-semibold">Hoffman Solutions</span>
             </SheetTitle>
           </SheetHeader>
           <nav className="px-3 py-3">
@@ -87,9 +89,9 @@ export function MobileNav({ role }: { role: UserRole }) {
                       href={item.href}
                       onClick={() => setOpen(false)}
                       className={cn(
-                        "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
+                        "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
                         isActive
-                          ? "bg-accent text-accent-foreground font-medium"
+                          ? "bg-primary/10 text-primary font-medium"
                           : "text-foreground/70 hover:bg-accent hover:text-accent-foreground"
                       )}
                     >
@@ -103,7 +105,7 @@ export function MobileNav({ role }: { role: UserRole }) {
           </nav>
         </SheetContent>
       </Sheet>
-      <span className="ml-2 text-sm font-semibold">Hoffman Solutions</span>
+      <span className="ml-2 text-sm font-semibold text-primary">Hoffman Solutions</span>
     </div>
   );
 }
