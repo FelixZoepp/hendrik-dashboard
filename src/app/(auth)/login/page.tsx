@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,18 +27,32 @@ function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
   const [magicLinkSent, setMagicLinkSent] = useState(false);
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next") || "/";
+  const next = searchParams.get("next") || "/sales";
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setStatus("Verbinde mit Supabase...");
 
     try {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (!url || !key) {
+        toast.error("Konfigurationsfehler", {
+          description: `Supabase URL: ${url ? "OK" : "FEHLT"}, Key: ${key ? "OK" : "FEHLT"}`,
+        });
+        setLoading(false);
+        setStatus("");
+        return;
+      }
+
+      setStatus("Sende Login...");
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -48,18 +62,25 @@ function LoginForm() {
           description: error.message,
         });
         setLoading(false);
+        setStatus("");
         return;
       }
 
-      // Hard redirect damit Auth-Cookies sicher beim nächsten Request dabei sind
+      if (!data.session) {
+        toast.error("Keine Session erhalten");
+        setLoading(false);
+        setStatus("");
+        return;
+      }
+
+      setStatus("Login erfolgreich, leite weiter...");
       window.location.href = next;
-      return;
     } catch (err) {
       toast.error("Verbindungsfehler", {
         description: err instanceof Error ? err.message : "Unbekannter Fehler",
       });
       setLoading(false);
-      return;
+      setStatus("");
     }
   }
 
@@ -73,7 +94,9 @@ function LoginForm() {
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${window.location.origin}/api/auth/callback` },
+      options: {
+        emailRedirectTo: `${window.location.origin}/api/auth/callback`,
+      },
     });
 
     if (error) {
@@ -146,6 +169,11 @@ function LoginForm() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? "Wird angemeldet…" : "Anmelden"}
           </Button>
+          {status && (
+            <p className="text-xs text-muted-foreground text-center">
+              {status}
+            </p>
+          )}
         </form>
         <div className="relative my-4">
           <div className="absolute inset-0 flex items-center">
