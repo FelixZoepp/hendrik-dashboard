@@ -36,22 +36,31 @@ function LoginForm() {
     e.preventDefault();
     setLoading(true);
 
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      toast.error("Login fehlgeschlagen", {
-        description: "E-Mail oder Passwort stimmen nicht.",
+      if (error) {
+        toast.error("Login fehlgeschlagen", {
+          description: error.message,
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Hard redirect damit Auth-Cookies sicher beim nächsten Request dabei sind
+      window.location.href = next;
+      return;
+    } catch (err) {
+      toast.error("Verbindungsfehler", {
+        description: err instanceof Error ? err.message : "Unbekannter Fehler",
       });
       setLoading(false);
       return;
     }
-
-    // Hard redirect damit Auth-Cookies sicher beim nächsten Request dabei sind
-    window.location.href = next;
   }
 
   async function handleMagicLink() {
