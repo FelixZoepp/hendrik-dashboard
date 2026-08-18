@@ -2,15 +2,15 @@
   "crons": [
     {
       "path": "/api/cron/sync-close",
-      "schedule": "0 * * * *"
+      "schedule": "0 6 * * *"
     },
     {
       "path": "/api/cron/sync-calendly",
-      "schedule": "15,45 * * * *"
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/cron/lead-reminders",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 8 * * *"
     }
   ]
 }
