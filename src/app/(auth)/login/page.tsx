@@ -50,8 +50,8 @@ function LoginForm() {
       return;
     }
 
-    router.push(next);
-    router.refresh();
+    // Hard redirect damit Auth-Cookies sicher beim nächsten Request dabei sind
+    window.location.href = next;
   }
 
   async function handleMagicLink() {
