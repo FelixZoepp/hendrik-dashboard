@@ -5,6 +5,8 @@ import {
   fetchOpportunities,
   fetchActivities,
   fetchUsers,
+  fetchCustomActivities,
+  fetchCustomActivityTypes,
 } from "@/lib/integrations/close";
 
 export const maxDuration = 300; // 5 Min. max
@@ -116,6 +118,28 @@ export async function GET(request: Request) {
       );
     }
     totalRecords += activities.length;
+
+    // 5. Custom Activities syncen (Gesprächsprotokoll etc.)
+    const customActivityTypes = await fetchCustomActivityTypes();
+    const typeNameMap = new Map(customActivityTypes.map((t) => [t.id, t.name]));
+
+    const customActivities = await fetchCustomActivities(since);
+    for (const ca of customActivities) {
+      await supabase.from("close_custom_activities").upsert(
+        {
+          close_id: ca.id,
+          lead_id: ca.lead_id,
+          custom_activity_type_id: ca.custom_activity_type_id,
+          custom_activity_type_name:
+            typeNameMap.get(ca.custom_activity_type_id) ?? "Unbekannt",
+          user_id: ca.user_id,
+          date_created: ca.date_created,
+          fields: ca.fields ?? {},
+        },
+        { onConflict: "close_id" }
+      );
+    }
+    totalRecords += customActivities.length;
 
     // Sync-Log abschließen
     if (syncId) {

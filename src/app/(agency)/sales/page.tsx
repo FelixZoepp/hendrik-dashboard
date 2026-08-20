@@ -18,7 +18,6 @@ export default async function SalesPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-
   const supabase = createAdminClient();
   const params = await searchParams;
   const days = getDaysFromSearchParams(params);
@@ -26,7 +25,6 @@ export default async function SalesPage({
   const since = subDays(new Date(), days).toISOString();
   const sinceDate = subDays(new Date(), days).toISOString().split("T")[0];
 
-  // Vorperiode für Delta-Vergleich
   const prevStart = subDays(new Date(), days * 2).toISOString();
   const prevEnd = since;
   const prevDate = subDays(new Date(), days * 2).toISOString().split("T")[0];
@@ -34,6 +32,7 @@ export default async function SalesPage({
 
   const [
     usersRes, leadsRes, oppsRes, activitiesRes, calendlyRes, metaRes,
+    customActRes,
     prevLeadsRes, prevOppsRes, prevCalendlyRes, prevMetaRes,
   ] = await Promise.all([
     supabase.from("close_users").select("*"),
@@ -42,6 +41,8 @@ export default async function SalesPage({
     supabase.from("close_activities").select("*").gte("date_created", since),
     supabase.from("calendly_events").select("*").gte("scheduled_at", since),
     supabase.from("meta_ad_insights").select("spend").gte("date", sinceDate),
+    // Custom Activities (Gesprächsprotokolle)
+    supabase.from("close_custom_activities").select("*").gte("date_created", since),
     // Vorperiode
     supabase.from("close_leads").select("close_id").gte("date_created", prevStart).lt("date_created", prevEnd),
     supabase.from("close_opportunities").select("close_id, value, status_type").gte("date_created", prevStart).lt("date_created", prevEnd),
@@ -53,7 +54,6 @@ export default async function SalesPage({
     (sum: number, r: { spend: number }) => sum + Number(r.spend), 0
   );
 
-  // Vorperioden-KPIs für Delta
   const prevLeads = (prevLeadsRes.data ?? []).length;
   const prevWon = (prevOppsRes.data ?? []).filter((o: { status_type: string }) => o.status_type === "won");
   const prevUmsatz = prevWon.reduce((s: number, o: { value: number }) => s + (o.value ?? 0), 0);
@@ -90,6 +90,7 @@ export default async function SalesPage({
         opportunities={oppsRes.data ?? []}
         activities={activitiesRes.data ?? []}
         calendlyEvents={calendlyRes.data ?? []}
+        customActivities={customActRes.data ?? []}
         metaSpend={metaSpend}
         prevPeriod={prevPeriod}
       />

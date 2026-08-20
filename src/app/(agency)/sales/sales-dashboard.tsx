@@ -52,6 +52,7 @@ interface CloseActivity {
 
 interface CalendlyEvent {
   calendly_uri: string;
+  event_type_name: string | null;
   status: string;
   no_show: boolean;
   canceled_by: string | null;
@@ -61,8 +62,11 @@ interface CalendlyEvent {
   invitee_name: string | null;
 }
 
-interface MetaInsight {
-  spend: number;
+interface CustomActivity {
+  close_id: string;
+  custom_activity_type_name: string | null;
+  user_id: string | null;
+  date_created: string | null;
 }
 
 interface PrevPeriod {
@@ -79,6 +83,7 @@ interface SalesDashboardProps {
   opportunities: CloseOpp[];
   activities: CloseActivity[];
   calendlyEvents: CalendlyEvent[];
+  customActivities: CustomActivity[];
   metaSpend?: number;
   prevPeriod?: PrevPeriod;
 }
@@ -89,9 +94,34 @@ export function SalesDashboard({
   opportunities,
   activities,
   calendlyEvents,
+  customActivities,
   metaSpend = 0,
   prevPeriod,
 }: SalesDashboardProps) {
+  // Gesprächsprotokolle (Custom Activity "Gesprächsprotokoll 1 Cold Call")
+  const gespraechsprotokolle = customActivities.filter((ca) =>
+    ca.custom_activity_type_name?.toLowerCase().includes("gesprächsprotokoll") ||
+    ca.custom_activity_type_name?.toLowerCase().includes("gesprachsprotokoll") ||
+    ca.custom_activity_type_name?.toLowerCase().includes("cold call")
+  );
+
+  // Calendly: Erstgespräch vs Beratungsgespräch
+  const erstgespraeche = calendlyEvents.filter((e) =>
+    e.event_type_name?.toLowerCase().includes("erstgespräch") ||
+    e.event_type_name?.toLowerCase().includes("erstgespraech")
+  );
+  const beratungsgespraeche = calendlyEvents.filter((e) =>
+    e.event_type_name?.toLowerCase().includes("beratungsgespräch") ||
+    e.event_type_name?.toLowerCase().includes("beratungsgespraech")
+  );
+
+  const erstShowsCount = erstgespraeche.filter((e) => e.status === "active" && !e.no_show).length;
+  const erstAbgesagtCount = erstgespraeche.filter((e) => e.status === "canceled").length;
+  const erstNoShowCount = erstgespraeche.filter((e) => e.no_show).length;
+
+  const beratungShowsCount = beratungsgespraeche.filter((e) => e.status === "active" && !e.no_show).length;
+  const beratungAbgesagtCount = beratungsgespraeche.filter((e) => e.status === "canceled").length;
+  const beratungNoShowCount = beratungsgespraeche.filter((e) => e.no_show).length;
   // ========== KPIs ==========
   const kpis = useMemo((): SalesKpis => {
     const calls = activities.filter((a) => a.type === "call");
@@ -369,6 +399,15 @@ export function SalesDashboard({
               { label: "Cost / Closing Call", value: formatEuro(kpis.costPerClosingCall) },
               { label: "Cost / Close (CAC)", value: formatEuro(kpis.costPerClose) },
               { label: "Revenue / Lead", value: formatEuro(kpis.revenuePerLead) },
+              { label: "Gesprächsprotokolle", value: gespraechsprotokolle.length.toString() },
+              { label: "Erstgespräche (Setting)", value: `${erstgespraeche.length} (${erstShowsCount} Shows)` },
+              { label: "Beratungsgespräche", value: `${beratungsgespraeche.length} (${beratungShowsCount} Shows)` },
+              { label: "Absagen Erstgespr.", value: erstAbgesagtCount.toString(), warn: erstAbgesagtCount > 0 },
+              { label: "Absagen Beratung", value: beratungAbgesagtCount.toString(), warn: beratungAbgesagtCount > 0 },
+              { label: "No-Shows Erstgespr.", value: erstNoShowCount.toString(), warn: erstNoShowCount > 0 },
+              { label: "No-Shows Beratung", value: beratungNoShowCount.toString(), warn: beratungNoShowCount > 0 },
+              { label: "Show-Rate Erstgespr.", value: erstgespraeche.length > 0 ? formatPercent((erstShowsCount / erstgespraeche.length) * 100) : "—" },
+              { label: "Show-Rate Beratung", value: beratungsgespraeche.length > 0 ? formatPercent((beratungShowsCount / beratungsgespraeche.length) * 100) : "—" },
             ] as { label: string; value: string; warn?: boolean; d?: string | null }[]).map((kpi) => (
               <div key={kpi.label} className="rounded-lg border bg-card p-3">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
@@ -431,7 +470,7 @@ export function SalesDashboard({
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/50">
-                        {["Name", "Anrufe", "Erreicht", "Quote", "Ø Dauer", "Gesamtzeit", "Termine", "T/100 Calls", "Show-Rate", "Closes", "Umsatz"].map((h) => (
+                        {["Name", "Anrufe", "Erreicht", "Quote", "Ø Dauer", "Gesamtzeit", "Protokolle", "Termine", "T/100 Calls", "Show-Rate", "Closes", "Umsatz"].map((h) => (
                           <th key={h} className={cn("px-3 py-2 text-xs font-medium text-muted-foreground", h === "Name" ? "text-left" : "text-right")}>{h}</th>
                         ))}
                       </tr>
@@ -448,6 +487,7 @@ export function SalesDashboard({
                           <td className="px-3 py-2 text-right font-mono">{formatPercent(p.gespraechsquote)}</td>
                           <td className="px-3 py-2 text-right font-mono">{formatSeconds(p.avgGespraechsdauer)}</td>
                           <td className="px-3 py-2 text-right font-mono">{formatSeconds(p.gespraechszeitGesamt)}</td>
+                          <td className="px-3 py-2 text-right font-mono">{gespraechsprotokolle.filter((g) => g.user_id === p.closeId).length}</td>
                           <td className="px-3 py-2 text-right font-mono">{p.termineGesetzt}</td>
                           <td className="px-3 py-2 text-right font-mono">{formatPercent(p.termineProHundert)}</td>
                           <td className="px-3 py-2 text-right font-mono">{formatPercent(p.showRateEigen)}</td>

@@ -59,9 +59,9 @@ async function calendlyApi<T>(
   path: string,
   params?: Record<string, string>,
 ): Promise<T> {
-  const token = process.env.CALENDLY_TOKEN;
+  const token = process.env.CALENDLY_TOKEN || process.env.CALENDLY_API_KEY;
   if (!token) {
-    throw new Error("Missing CALENDLY_TOKEN environment variable");
+    throw new Error("Missing CALENDLY_TOKEN / CALENDLY_API_KEY environment variable");
   }
 
   const url = new URL(`${CALENDLY_BASE_URL}${path}`);
@@ -91,6 +91,27 @@ async function calendlyApi<T>(
 }
 
 // ---------------------------------------------------------------------------
+// Auto-detect Organization URI from current user
+// ---------------------------------------------------------------------------
+
+let cachedOrgUri: string | null = null;
+
+async function getOrgUri(): Promise<string> {
+  if (cachedOrgUri) return cachedOrgUri;
+
+  const data = await calendlyApi<{
+    resource: {
+      current_organization: string;
+    };
+  }>("/users/me");
+
+  cachedOrgUri = data.resource.current_organization;
+  return cachedOrgUri;
+}
+
+export { getOrgUri };
+
+// ---------------------------------------------------------------------------
 // Fetch scheduled events (paginated)
 // ---------------------------------------------------------------------------
 
@@ -99,9 +120,9 @@ export async function fetchEvents(opts?: {
   maxDate?: Date;
   status?: "active" | "canceled";
 }): Promise<CalendlyEvent[]> {
-  const orgUri = process.env.CALENDLY_ORG_URI;
+  const orgUri = process.env.CALENDLY_ORG_URI || await getOrgUri();
   if (!orgUri) {
-    throw new Error("Missing CALENDLY_ORG_URI environment variable");
+    throw new Error("Could not determine Calendly organization URI");
   }
 
   const allEvents: CalendlyEvent[] = [];

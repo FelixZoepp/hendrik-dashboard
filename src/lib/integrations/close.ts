@@ -256,3 +256,50 @@ export async function fetchActivities(
 export async function fetchUsers(): Promise<CloseUser[]> {
   return fetchAllPaginated<CloseUser>("/user/");
 }
+
+/**
+ * Fetch custom activities (z.B. Gesprächsprotokoll).
+ * Close Custom Activities haben eigene Endpoints: /activity/custom_activity/{custom_activity_type_id}/
+ * Alternativ: /activity/?_type=CustomActivity
+ */
+export interface CloseCustomActivity {
+  id: string;
+  lead_id: string;
+  _type: string;
+  custom_activity_type_id: string;
+  user_id: string;
+  date_created: string;
+  status: string;
+  fields?: Record<string, unknown>;
+}
+
+export async function fetchCustomActivities(
+  since?: Date,
+): Promise<CloseCustomActivity[]> {
+  const params: Record<string, string> = {};
+  if (since) {
+    params.date_created__gte = since.toISOString();
+  }
+
+  // Fetch all custom activities
+  return fetchAllPaginated<CloseCustomActivity>(
+    "/activity/custom_activity/",
+    params,
+  );
+}
+
+/**
+ * Fetch custom activity types to identify which one is "Gesprächsprotokoll"
+ */
+export interface CloseCustomActivityType {
+  id: string;
+  name: string;
+  organization_id: string;
+}
+
+export async function fetchCustomActivityTypes(): Promise<CloseCustomActivityType[]> {
+  const response = await closeApi<{ data: CloseCustomActivityType[] }>(
+    "/custom_activity/",
+  );
+  return response.data;
+}
