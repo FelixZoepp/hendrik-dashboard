@@ -3,7 +3,8 @@ import { Suspense } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import { MarketingDashboard } from "./marketing-dashboard";
-import { PeriodFilter, getDaysFromSearchParams } from "@/components/ui/period-filter";
+import { PeriodFilter } from "@/components/ui/period-filter";
+import { getDaysFromSearchParams } from "@/lib/period-utils";
 import { subDays } from "date-fns";
 
 export const metadata: Metadata = { title: "Marketing" };

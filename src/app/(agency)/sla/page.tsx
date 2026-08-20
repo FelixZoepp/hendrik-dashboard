@@ -3,7 +3,8 @@ import { Suspense } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import { SlaOverview } from "./sla-overview";
-import { PeriodFilter, getDaysFromSearchParams } from "@/components/ui/period-filter";
+import { PeriodFilter } from "@/components/ui/period-filter";
+import { getDaysFromSearchParams } from "@/lib/period-utils";
 import { subDays } from "date-fns";
 import type { LeadSla, Company } from "@/lib/types/database";
 
