@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { CourseDetail } from "./course-detail";
 import type { Metadata } from "next";
 
@@ -11,7 +11,7 @@ export async function generateMetadata({
   params: Promise<{ courseId: string }>;
 }): Promise<Metadata> {
   const { courseId } = await params;
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("courses")
     .select("titel")
@@ -27,7 +27,7 @@ export default async function CourseDetailPage({
 }) {
   const { courseId } = await params;
   const userId = "";
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [courseRes, progressRes] = await Promise.all([
     supabase

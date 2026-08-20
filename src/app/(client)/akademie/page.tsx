@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { GraduationCap, Clock, CheckCircle2 } from "lucide-react";
 
@@ -25,7 +25,7 @@ interface Progress {
 
 export default async function AkademiePage() {
   const userId = "";
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [coursesRes, progressRes] = await Promise.all([
     supabase

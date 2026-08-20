@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import { KundenView } from "./kunden-view";
 import type { Company } from "@/lib/types/database";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function KundenPage() {
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data } = await supabase
     .from("companies")

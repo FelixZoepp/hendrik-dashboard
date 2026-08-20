@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import { SopLibrary } from "./sop-library";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SopsPage() {
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: sops } = await supabase
     .from("sops")

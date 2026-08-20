@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import { ProjectDetail } from "./project-detail";
 import type { Metadata } from "next";
@@ -12,7 +12,7 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("projects")
     .select("typ, companies(name)")
@@ -34,7 +34,7 @@ export default async function ProjectDetailPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [projectRes, sopsRes] = await Promise.all([
     supabase

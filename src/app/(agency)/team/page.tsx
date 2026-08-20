@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import { TeamView } from "./team-view";
 
@@ -30,7 +30,7 @@ interface CloseUser {
 
 export default async function TeamPage() {
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [profilesRes, closeUsersRes] = await Promise.all([
     supabase

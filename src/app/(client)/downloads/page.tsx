@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import { Download, FileText, FolderOpen } from "lucide-react";
 
@@ -15,7 +15,7 @@ interface DownloadItem {
 
 export default async function DownloadsPage() {
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: downloads } = await supabase
     .from("downloads")

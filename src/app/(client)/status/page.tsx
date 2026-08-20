@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
 import { Globe, Megaphone, Activity, Package, ExternalLink } from "lucide-react";
 
@@ -43,7 +43,7 @@ interface ProjectRow {
 }
 
 export default async function KundenStatusPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const companyId = null;
   if (!companyId) {

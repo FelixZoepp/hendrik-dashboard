@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { FulfillmentBoard } from "./fulfillment-board";
 
 export const metadata: Metadata = { title: "Fulfillment" };
 export const dynamic = "force-dynamic";
 
 export default async function FulfillmentPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [projectsRes, companiesRes] = await Promise.all([
     supabase

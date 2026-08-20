@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import { SalesDashboard } from "./sales-dashboard";
 import { PeriodFilter, getDaysFromSearchParams } from "@/components/ui/period-filter";
@@ -18,7 +18,7 @@ export default async function SalesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const params = await searchParams;
   const days = getDaysFromSearchParams(params);
 

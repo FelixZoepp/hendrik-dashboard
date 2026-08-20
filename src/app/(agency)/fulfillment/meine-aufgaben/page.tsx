@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Badge } from "@/components/ui/badge";
 import { Circle, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -46,7 +46,7 @@ interface TaskRow {
 }
 
 export default async function MeineAufgabenPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const { data: tasks } = await supabase
     .from("project_tasks")

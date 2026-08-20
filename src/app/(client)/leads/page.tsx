@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { LeadsView } from "./leads-view";
 import type { Lead, Company } from "@/lib/types/database";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
   const companyId = null;
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const isStaff = !companyId;
 
   let query = supabase

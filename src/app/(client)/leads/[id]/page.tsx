@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { LeadDetail } from "./lead-detail";
 import type { Lead, LeadActivity, Profile } from "@/lib/types/database";
 import type { Metadata } from "next";
@@ -12,7 +12,7 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("leads")
     .select("vorname, nachname")
@@ -32,7 +32,7 @@ export default async function LeadDetailPage({
   const { id } = await params;
   const isStaff = true;
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   const [leadResult, activitiesResult] = await Promise.all([
     supabase.from("leads").select("*").eq("id", id).single(),
