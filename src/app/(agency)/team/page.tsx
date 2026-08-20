@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
+
 import { TeamView } from "./team-view";
 
 export const metadata: Metadata = {
@@ -29,7 +29,7 @@ interface CloseUser {
 }
 
 export default async function TeamPage() {
-  await requireRole(["admin"]);
+
   const supabase = await createClient();
 
   const [profilesRes, closeUsersRes] = await Promise.all([

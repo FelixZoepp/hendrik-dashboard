@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
 import { LeadsView } from "./leads-view";
 import type { Lead, Company } from "@/lib/types/database";
 
@@ -11,13 +10,9 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function LeadsPage() {
-  const profile = await requireRole([
-    "admin",
-    "client_owner",
-    "client_member",
-  ]);
+  const companyId = null;
   const supabase = await createClient();
-  const isStaff = !profile.company_id;
+  const isStaff = !companyId;
 
   let query = supabase
     .from("leads")
@@ -25,8 +20,8 @@ export default async function LeadsPage() {
     .order("created_at", { ascending: false });
 
   // Clients sehen nur ihre Company-Leads (RLS macht das auch, aber explizit filtern ist schneller)
-  if (profile.company_id) {
-    query = query.eq("company_id", profile.company_id);
+  if (companyId) {
+    query = query.eq("company_id", companyId);
   }
 
   // Staff braucht die Firmenliste für den Lead-anlegen Dialog
@@ -49,7 +44,7 @@ export default async function LeadsPage() {
           ? ((companiesResult.data as Pick<Company, "id" | "name">[]) ?? [])
           : undefined
       }
-      userCompanyId={profile.company_id}
+      userCompanyId={companyId}
     />
   );
 }

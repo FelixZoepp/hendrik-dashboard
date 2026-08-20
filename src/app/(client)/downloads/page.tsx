@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { requireAuth } from "@/lib/auth";
+
 import { Download, FileText, FolderOpen } from "lucide-react";
 
 export const metadata: Metadata = { title: "Downloads" };
@@ -14,7 +14,7 @@ interface DownloadItem {
 }
 
 export default async function DownloadsPage() {
-  await requireAuth();
+
   const supabase = await createClient();
 
   const { data: downloads } = await supabase

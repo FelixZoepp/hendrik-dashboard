@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
+
 import { SlaOverview } from "./sla-overview";
 import { PeriodFilter, getDaysFromSearchParams } from "@/components/ui/period-filter";
 import { subDays } from "date-fns";
@@ -18,7 +18,7 @@ export default async function SlaPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireRole(["admin"]);
+
   const supabase = await createClient();
   const params = await searchParams;
   const days = getDaysFromSearchParams(params);

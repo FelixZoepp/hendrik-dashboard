@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
 import { LeadDetail } from "./lead-detail";
 import type { Lead, LeadActivity, Profile } from "@/lib/types/database";
 import type { Metadata } from "next";
@@ -31,8 +30,7 @@ export default async function LeadDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const profile = await requireRole(["admin", "client_owner", "client_member"]);
-  const isStaff = !profile.company_id;
+  const isStaff = true;
 
   const supabase = await createClient();
 

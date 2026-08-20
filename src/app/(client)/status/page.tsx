@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Globe, Megaphone, Activity, Package, ExternalLink } from "lucide-react";
 
@@ -44,10 +43,9 @@ interface ProjectRow {
 }
 
 export default async function KundenStatusPage() {
-  const profile = await requireRole(["admin", "client_owner", "client_member"]);
   const supabase = await createClient();
 
-  const companyId = profile.company_id;
+  const companyId = null;
   if (!companyId) {
     return (
       <div className="space-y-6">

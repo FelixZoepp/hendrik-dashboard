@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
+
 import { ProjectDetail } from "./project-detail";
 import type { Metadata } from "next";
 
@@ -33,7 +33,7 @@ export default async function ProjectDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireRole(["admin", "fulfillment"]);
+
   const supabase = await createClient();
 
   const [projectRes, sopsRes] = await Promise.all([

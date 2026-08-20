@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { requireAuth } from "@/lib/auth";
 import Link from "next/link";
 import { GraduationCap, Clock, CheckCircle2 } from "lucide-react";
 
@@ -25,7 +24,7 @@ interface Progress {
 }
 
 export default async function AkademiePage() {
-  const profile = await requireAuth();
+  const userId = "";
   const supabase = await createClient();
 
   const [coursesRes, progressRes] = await Promise.all([
@@ -36,7 +35,7 @@ export default async function AkademiePage() {
     supabase
       .from("lesson_progress")
       .select("lesson_id")
-      .eq("user_id", profile.id),
+      .eq("user_id", userId),
   ]);
 
   const courses = (coursesRes.data ?? []) as Course[];

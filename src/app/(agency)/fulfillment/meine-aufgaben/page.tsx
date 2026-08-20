@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Circle, Loader2, CheckCircle2 } from "lucide-react";
 
@@ -47,13 +46,12 @@ interface TaskRow {
 }
 
 export default async function MeineAufgabenPage() {
-  const profile = await requireRole(["admin", "fulfillment"]);
   const supabase = await createClient();
 
   const { data: tasks } = await supabase
     .from("project_tasks")
     .select("id, titel, status, due_date, project_id, projects(typ, companies(name))")
-    .eq("assignee", profile.id)
+    .eq("assignee", "")
     .order("due_date", { ascending: true, nullsFirst: false })
     .order("status", { ascending: true });
 

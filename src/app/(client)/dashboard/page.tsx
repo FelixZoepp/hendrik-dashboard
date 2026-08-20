@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
-import { requireRole } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/lead-utils";
 import type { Lead, LeadSla, SlaAmpel } from "@/lib/types/database";
@@ -25,14 +24,9 @@ function formatMinuten(min: number): string {
 }
 
 export default async function ClientDashboardPage() {
-  const profile = await requireRole([
-    "admin",
-    "client_owner",
-    "client_member",
-  ]);
   const supabase = await createClient();
 
-  const companyId = profile.company_id;
+  const companyId = null;
   if (!companyId) {
     return (
       <div className="space-y-6">

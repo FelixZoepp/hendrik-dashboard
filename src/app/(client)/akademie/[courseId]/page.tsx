@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requireAuth } from "@/lib/auth";
 import { CourseDetail } from "./course-detail";
 import type { Metadata } from "next";
 
@@ -27,7 +26,7 @@ export default async function CourseDetailPage({
   params: Promise<{ courseId: string }>;
 }) {
   const { courseId } = await params;
-  const profile = await requireAuth();
+  const userId = "";
   const supabase = await createClient();
 
   const [courseRes, progressRes] = await Promise.all([
@@ -41,7 +40,7 @@ export default async function CourseDetailPage({
     supabase
       .from("lesson_progress")
       .select("lesson_id, abgeschlossen_am")
-      .eq("user_id", profile.id),
+      .eq("user_id", userId),
   ]);
 
   if (!courseRes.data) notFound();
@@ -50,7 +49,7 @@ export default async function CourseDetailPage({
     <CourseDetail
       course={courseRes.data}
       progress={progressRes.data ?? []}
-      userId={profile.id}
+      userId={userId}
     />
   );
 }

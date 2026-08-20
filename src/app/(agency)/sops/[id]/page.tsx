@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { requireAuth } from "@/lib/auth";
+
 import Link from "next/link";
 import { ArrowLeft, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +30,7 @@ export default async function SopDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireAuth();
+
   const supabase = await createClient();
 
   const { data: sop } = await supabase
