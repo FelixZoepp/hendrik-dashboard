@@ -105,15 +105,22 @@ export function SalesDashboard({
     ca.custom_activity_type_name?.toLowerCase().includes("cold call")
   );
 
-  // Calendly: Erstgespräch vs Beratungsgespräch
+  // Calendly: Erstgespräch vs Strategiegespräch vs Onboarding
   const erstgespraeche = calendlyEvents.filter((e) =>
     e.event_type_name?.toLowerCase().includes("erstgespräch") ||
     e.event_type_name?.toLowerCase().includes("erstgespraech")
   );
   const beratungsgespraeche = calendlyEvents.filter((e) =>
+    e.event_type_name?.toLowerCase().includes("strategiegespräch") ||
+    e.event_type_name?.toLowerCase().includes("strategiegespraech") ||
     e.event_type_name?.toLowerCase().includes("beratungsgespräch") ||
     e.event_type_name?.toLowerCase().includes("beratungsgespraech")
   );
+  const onboardings = calendlyEvents.filter((e) =>
+    e.event_type_name?.toLowerCase().includes("onboarding")
+  );
+  const onboardingShows = onboardings.filter((e) => e.status === "active" && !e.no_show).length;
+  const onboardingAbgesagt = onboardings.filter((e) => e.status === "canceled").length;
 
   const erstShowsCount = erstgespraeche.filter((e) => e.status === "active" && !e.no_show).length;
   const erstAbgesagtCount = erstgespraeche.filter((e) => e.status === "canceled").length;
@@ -400,14 +407,19 @@ export function SalesDashboard({
               { label: "Cost / Close (CAC)", value: formatEuro(kpis.costPerClose) },
               { label: "Revenue / Lead", value: formatEuro(kpis.revenuePerLead) },
               { label: "Gesprächsprotokolle", value: gespraechsprotokolle.length.toString() },
-              { label: "Erstgespräche (Setting)", value: `${erstgespraeche.length} (${erstShowsCount} Shows)` },
-              { label: "Beratungsgespräche", value: `${beratungsgespraeche.length} (${beratungShowsCount} Shows)` },
-              { label: "Absagen Erstgespr.", value: erstAbgesagtCount.toString(), warn: erstAbgesagtCount > 0 },
-              { label: "Absagen Beratung", value: beratungAbgesagtCount.toString(), warn: beratungAbgesagtCount > 0 },
-              { label: "No-Shows Erstgespr.", value: erstNoShowCount.toString(), warn: erstNoShowCount > 0 },
-              { label: "No-Shows Beratung", value: beratungNoShowCount.toString(), warn: beratungNoShowCount > 0 },
-              { label: "Show-Rate Erstgespr.", value: erstgespraeche.length > 0 ? formatPercent((erstShowsCount / erstgespraeche.length) * 100) : "—" },
-              { label: "Show-Rate Beratung", value: beratungsgespraeche.length > 0 ? formatPercent((beratungShowsCount / beratungsgespraeche.length) * 100) : "—" },
+              { label: "Erstgespräche", value: `${erstgespraeche.length} gebucht` },
+              { label: "Erst. Shows", value: erstShowsCount.toString() },
+              { label: "Erst. No-Shows", value: erstNoShowCount.toString(), warn: erstNoShowCount > 5 },
+              { label: "Erst. Absagen", value: erstAbgesagtCount.toString() },
+              { label: "Erst. Show-Rate", value: erstgespraeche.length > 0 ? formatPercent((erstShowsCount / erstgespraeche.length) * 100) : "—" },
+              { label: "Strategiegespräche", value: `${beratungsgespraeche.length} gebucht` },
+              { label: "Strategie Shows", value: beratungShowsCount.toString() },
+              { label: "Strategie No-Shows", value: beratungNoShowCount.toString(), warn: beratungNoShowCount > 0 },
+              { label: "Strategie Absagen", value: beratungAbgesagtCount.toString(), warn: beratungAbgesagtCount > 5 },
+              { label: "Strategie Show-Rate", value: beratungsgespraeche.length > 0 ? formatPercent((beratungShowsCount / beratungsgespraeche.length) * 100) : "—" },
+              { label: "Erst → Strategie", value: erstShowsCount > 0 ? formatPercent((beratungsgespraeche.length / erstShowsCount) * 100) : "—" },
+              { label: "Onboardings", value: `${onboardingShows} / ${onboardings.length}` },
+              { label: "Strategie → Onboard.", value: beratungShowsCount > 0 ? formatPercent((onboardingShows / beratungShowsCount) * 100) : "—" },
             ] as { label: string; value: string; warn?: boolean; d?: string | null }[]).map((kpi) => (
               <div key={kpi.label} className="rounded-lg border bg-card p-3">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
