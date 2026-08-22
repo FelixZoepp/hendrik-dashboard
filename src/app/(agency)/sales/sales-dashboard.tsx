@@ -420,7 +420,9 @@ export function SalesDashboard({
               { label: "Erst → Strategie", value: erstShowsCount > 0 ? formatPercent((beratungsgespraeche.length / erstShowsCount) * 100) : "—" },
               { label: "Onboardings", value: `${onboardingShows} / ${onboardings.length}` },
               { label: "Strategie → Onboard.", value: beratungShowsCount > 0 ? formatPercent((onboardingShows / beratungShowsCount) * 100) : "—" },
-            ] as { label: string; value: string; warn?: boolean; d?: string | null }[]).map((kpi) => (
+            ] as { label: string; value: string; warn?: boolean; d?: string | null }[])
+            .filter((kpi) => kpi.value !== "0" && kpi.value !== "0 €" && kpi.value !== "0,0%" && kpi.value !== "—" && !kpi.value.startsWith("0 "))
+            .map((kpi) => (
               <div key={kpi.label} className="rounded-lg border bg-card p-3">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
                 <div className="flex items-baseline gap-1.5">

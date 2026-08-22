@@ -2,12 +2,12 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 
 const PERIODS = [
-  { label: "7 Tage", value: "7" },
-  { label: "30 Tage", value: "30" },
-  { label: "90 Tage", value: "90" },
+  { label: "7T", value: "7" },
+  { label: "30T", value: "30" },
+  { label: "90T", value: "90" },
+  { label: "Max", value: "9999" },
 ] as const;
 
 export function PeriodFilter() {
@@ -38,4 +38,3 @@ export function PeriodFilter() {
     </div>
   );
 }
-
