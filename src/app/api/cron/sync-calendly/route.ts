@@ -37,33 +37,30 @@ export async function GET(request: Request) {
     const minDate = subDays(new Date(), 90).toISOString();
     const allEvents: Record<string, unknown>[] = [];
 
+    // Fetch in 30-Tage-Blöcken um Pagination zu vermeiden
     for (const status of ["active", "canceled"]) {
-      let nextPageToken: string | null = null;
-      let isFirst = true;
+      for (let offset = 0; offset < 90; offset += 30) {
+        const blockStart = subDays(new Date(), 90 - offset).toISOString();
+        const blockEnd = subDays(new Date(), Math.max(0, 60 - offset)).toISOString();
 
-      while (isFirst || nextPageToken) {
-        isFirst = false;
         const url = new URL("https://api.calendly.com/scheduled_events");
         url.searchParams.set("organization", orgUri);
         url.searchParams.set("count", "100");
         url.searchParams.set("status", status);
-        url.searchParams.set("min_start_time", minDate);
-        if (nextPageToken) {
-          url.searchParams.set("page_token", nextPageToken);
-        }
+        url.searchParams.set("min_start_time", blockStart);
+        url.searchParams.set("max_start_time", blockEnd);
 
         const res = await fetch(url.toString(), {
           headers: { Authorization: `Bearer ${token}` },
         });
 
         if (!res.ok) {
-          const body = await res.text();
-          throw new Error(`Calendly ${res.status}: ${body}`);
+          // Skip block on error, continue with next
+          continue;
         }
 
         const data = await res.json();
         allEvents.push(...(data.collection ?? []));
-        nextPageToken = data.pagination?.next_page_token ?? null;
       }
     }
 
