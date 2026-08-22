@@ -77,7 +77,7 @@ export default async function SalesPage({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Sales-Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            Letzte {days} Tage — Close + Calendly
+            {days >= 9999 ? "Alle Daten" : `Letzte ${days} Tage`} — Close + Calendly
           </p>
         </div>
         <Suspense>
