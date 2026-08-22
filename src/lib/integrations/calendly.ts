@@ -126,37 +126,34 @@ export async function fetchEvents(opts?: {
   }
 
   const allEvents: CalendlyEvent[] = [];
-  let pageToken: string | undefined;
-  let isFirstPage = true;
+  let nextPageToken: string | null = null;
 
-  do {
-    const params: Record<string, string> = {
-      organization: orgUri,
-      count: "100",
-    };
+  // Erste Seite
+  const baseParams: Record<string, string> = {
+    organization: orgUri,
+    count: "100",
+  };
+  if (opts?.minDate) baseParams.min_start_time = opts.minDate.toISOString();
+  if (opts?.maxDate) baseParams.max_start_time = opts.maxDate.toISOString();
+  if (opts?.status) baseParams.status = opts.status;
 
-    if (opts?.minDate) {
-      params.min_start_time = opts.minDate.toISOString();
-    }
-    if (opts?.maxDate) {
-      params.max_start_time = opts.maxDate.toISOString();
-    }
-    if (opts?.status) {
-      params.status = opts.status;
-    }
-    if (pageToken && !isFirstPage) {
-      params.page_token = pageToken;
-    }
-    isFirstPage = false;
+  const firstPage = await calendlyApi<CalendlyPaginatedResponse<CalendlyEvent>>(
+    "/scheduled_events",
+    baseParams,
+  );
+  allEvents.push(...firstPage.collection);
+  nextPageToken = firstPage.pagination.next_page_token;
 
-    const data = await calendlyApi<CalendlyPaginatedResponse<CalendlyEvent>>(
+  // Folgeseiten
+  while (nextPageToken) {
+    const pageParams = { ...baseParams, page_token: nextPageToken };
+    const page = await calendlyApi<CalendlyPaginatedResponse<CalendlyEvent>>(
       "/scheduled_events",
-      params,
+      pageParams,
     );
-
-    allEvents.push(...data.collection);
-    pageToken = data.pagination.next_page_token ?? undefined;
-  } while (pageToken);
+    allEvents.push(...page.collection);
+    nextPageToken = page.pagination.next_page_token;
+  }
 
   return allEvents;
 }
