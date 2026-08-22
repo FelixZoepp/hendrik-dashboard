@@ -103,19 +103,27 @@ export function formatDays(days: number): string {
 }
 
 export function categorizeCancelReason(reason: string | null): string {
-  if (!reason) return "Kein Grund angegeben";
-  const lower = reason.toLowerCase();
+  if (!reason || reason.trim() === "") return "Kein Grund angegeben";
+  const lower = reason.toLowerCase().trim();
 
-  if (lower.includes("termin") || lower.includes("zeit") || lower.includes("passt nicht"))
-    return "Terminkonflikt";
-  if (lower.includes("krank") || lower.includes("gesundheit"))
+  if (lower.includes("verschoben") || lower.includes("verschieben"))
+    return "Verschoben";
+  if (lower.includes("krank") || lower.includes("gesundheit") || lower.includes("krankmeldung"))
     return "Krankheit";
-  if (lower.includes("interesse") || lower.includes("kein bedarf"))
-    return "Kein Interesse mehr";
-  if (lower.includes("ander") || lower.includes("woanders"))
+  if (lower.includes("kein interesse") || lower.includes("keine interesse") || lower.includes("kein intresse") || lower.includes("kein bedarf") || lower.includes("keine bedarf") || lower.includes("nicht relevant") || lower.includes("momentan nicht"))
+    return "Kein Interesse";
+  if (lower.includes("baustelle") || lower.includes("arbeit") || lower.includes("kunde") || lower.includes("büro") || lower.includes("rohrbruch") || lower.includes("auswärts"))
+    return "Baustelle / Arbeit";
+  if (lower.includes("keine zeit") || lower.includes("kein zeit") || lower.includes("zeit-not") || lower.includes("dazwischen") || lower.includes("wichtigen termin") || lower.includes("stau"))
+    return "Keine Zeit";
+  if (lower.includes("mitbewerber") || lower.includes("andere firma") || lower.includes("anderer anbieter") || lower.includes("agentur") || lower.includes("bereits") || lower.includes("homepage neu"))
     return "Anderer Anbieter";
-  if (lower.includes("vergessen") || lower.includes("forgot"))
-    return "Vergessen";
+  if (lower.includes("dopplung") || lower.includes("doppelbuchung") || lower.includes("falsche mail") || lower.includes("keine mail"))
+    return "Dopplung / Technik";
+  if (lower.includes("urlaub"))
+    return "Urlaub";
+  if (lower.includes("nicht anwesend") || lower.includes("nicht bestätigt") || lower.includes("abgesagt"))
+    return "Nicht erschienen";
 
   return "Sonstiges";
 }
