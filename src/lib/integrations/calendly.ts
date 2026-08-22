@@ -127,6 +127,7 @@ export async function fetchEvents(opts?: {
 
   const allEvents: CalendlyEvent[] = [];
   let pageToken: string | undefined;
+  let isFirstPage = true;
 
   do {
     const params: Record<string, string> = {
@@ -143,9 +144,10 @@ export async function fetchEvents(opts?: {
     if (opts?.status) {
       params.status = opts.status;
     }
-    if (pageToken) {
+    if (pageToken && !isFirstPage) {
       params.page_token = pageToken;
     }
+    isFirstPage = false;
 
     const data = await calendlyApi<CalendlyPaginatedResponse<CalendlyEvent>>(
       "/scheduled_events",

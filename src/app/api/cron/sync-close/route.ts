@@ -8,11 +8,25 @@ import {
   fetchCustomActivities,
   fetchCustomActivityTypes,
 } from "@/lib/integrations/close";
+import { subDays } from "date-fns";
 
-export const maxDuration = 300; // 5 Min. max
+export const maxDuration = 300;
+
+// Batch-Upsert Helper (max 500 pro Batch)
+async function batchUpsert(
+  supabase: ReturnType<typeof createAdminClient>,
+  table: string,
+  rows: Record<string, unknown>[],
+  onConflict: string
+) {
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+    await supabase.from(table).upsert(batch, { onConflict });
+  }
+}
 
 export async function GET(request: Request) {
-  // CRON_SECRET prüfen
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -20,7 +34,6 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
 
-  // Sync-Log starten
   const { data: syncLog } = await supabase
     .from("sync_log")
     .insert({ source: "close", status: "running" })
@@ -31,7 +44,7 @@ export async function GET(request: Request) {
   let totalRecords = 0;
 
   try {
-    // Letzten erfolgreichen Sync finden für Delta
+    // Delta: letzter erfolgreicher Sync, sonst 90 Tage
     const { data: lastSync } = await supabase
       .from("sync_log")
       .select("finished_at")
@@ -43,105 +56,103 @@ export async function GET(request: Request) {
 
     const since = lastSync?.finished_at
       ? new Date(lastSync.finished_at)
-      : undefined;
+      : subDays(new Date(), 90);
 
-    // 1. Users syncen
+    // 1. Users
     const users = await fetchUsers();
-    for (const user of users) {
-      await supabase.from("close_users").upsert(
-        {
-          close_id: user.id,
-          name: `${user.first_name} ${user.last_name}`.trim(),
-          email: user.email,
-        },
-        { onConflict: "close_id" }
-      );
-    }
+    await batchUpsert(
+      supabase,
+      "close_users",
+      users.map((u) => ({
+        close_id: u.id,
+        name: `${u.first_name} ${u.last_name}`.trim(),
+        email: u.email,
+      })),
+      "close_id"
+    );
     totalRecords += users.length;
 
-    // 2. Leads syncen
+    // 2. Leads
     const leads = await fetchLeads(since);
-    for (const lead of leads) {
-      await supabase.from("close_leads").upsert(
-        {
-          close_id: lead.id,
-          name: lead.display_name,
-          status_label: lead.status_label,
-          status_type: lead.status_type,
-          date_created: lead.date_created,
-          date_updated: lead.date_updated,
-          lead_source: lead.lead_source ?? null,
-          assigned_user: lead.assigned_to ?? null,
-          custom_fields: lead.custom ?? {},
-        },
-        { onConflict: "close_id" }
-      );
-    }
+    await batchUpsert(
+      supabase,
+      "close_leads",
+      leads.map((l) => ({
+        close_id: l.id,
+        name: l.display_name,
+        status_label: l.status_label,
+        status_type: l.status_type,
+        date_created: l.date_created,
+        date_updated: l.date_updated,
+        lead_source: l.lead_source ?? null,
+        assigned_user: l.assigned_to ?? null,
+        custom_fields: l.custom ?? {},
+      })),
+      "close_id"
+    );
     totalRecords += leads.length;
 
-    // 3. Opportunities syncen
-    const opportunities = await fetchOpportunities(since);
-    for (const opp of opportunities) {
-      await supabase.from("close_opportunities").upsert(
-        {
-          close_id: opp.id,
-          lead_id: opp.lead_id,
-          value: opp.value / 100, // Close speichert in Cents
-          value_period: opp.value_period,
-          status_label: opp.status_label,
-          status_type: opp.status_type,
-          confidence: opp.confidence,
-          date_won: opp.date_won ?? null,
-          user_id: opp.user_id,
-          date_created: opp.date_created,
-        },
-        { onConflict: "close_id" }
-      );
-    }
-    totalRecords += opportunities.length;
+    // 3. Opportunities
+    const opps = await fetchOpportunities(since);
+    await batchUpsert(
+      supabase,
+      "close_opportunities",
+      opps.map((o) => ({
+        close_id: o.id,
+        lead_id: o.lead_id,
+        value: o.value / 100,
+        value_period: o.value_period,
+        status_label: o.status_label,
+        status_type: o.status_type,
+        confidence: o.confidence,
+        date_won: o.date_won ?? null,
+        user_id: o.user_id,
+        date_created: o.date_created,
+      })),
+      "close_id"
+    );
+    totalRecords += opps.length;
 
-    // 4. Activities syncen
+    // 4. Activities
     const activities = await fetchActivities(since);
-    for (const act of activities) {
-      await supabase.from("close_activities").upsert(
-        {
-          close_id: act.id,
-          lead_id: act.lead_id,
-          type: act._type.toLowerCase().replace("activity", ""),
-          direction: act.direction ?? null,
-          duration: act.duration ?? null,
-          user_id: act.user_id,
-          date_created: act.date_created,
-          disposition: act.disposition ?? null,
-        },
-        { onConflict: "close_id" }
-      );
-    }
+    await batchUpsert(
+      supabase,
+      "close_activities",
+      activities.map((a) => ({
+        close_id: a.id,
+        lead_id: a.lead_id,
+        type: a._type.toLowerCase().replace("activity", ""),
+        direction: a.direction ?? null,
+        duration: a.duration ?? null,
+        user_id: a.user_id,
+        date_created: a.date_created,
+        disposition: a.disposition ?? null,
+      })),
+      "close_id"
+    );
     totalRecords += activities.length;
 
-    // 5. Custom Activities syncen (Gesprächsprotokoll etc.)
-    const customActivityTypes = await fetchCustomActivityTypes();
-    const typeNameMap = new Map(customActivityTypes.map((t) => [t.id, t.name]));
+    // 5. Custom Activities
+    const customTypes = await fetchCustomActivityTypes();
+    const typeMap = new Map(customTypes.map((t) => [t.id, t.name]));
 
-    const customActivities = await fetchCustomActivities(since);
-    for (const ca of customActivities) {
-      await supabase.from("close_custom_activities").upsert(
-        {
-          close_id: ca.id,
-          lead_id: ca.lead_id,
-          custom_activity_type_id: ca.custom_activity_type_id,
-          custom_activity_type_name:
-            typeNameMap.get(ca.custom_activity_type_id) ?? "Unbekannt",
-          user_id: ca.user_id,
-          date_created: ca.date_created,
-          fields: ca.fields ?? {},
-        },
-        { onConflict: "close_id" }
-      );
-    }
-    totalRecords += customActivities.length;
+    const customActs = await fetchCustomActivities(since);
+    await batchUpsert(
+      supabase,
+      "close_custom_activities",
+      customActs.map((ca) => ({
+        close_id: ca.id,
+        lead_id: ca.lead_id,
+        custom_activity_type_id: ca.custom_activity_type_id,
+        custom_activity_type_name: typeMap.get(ca.custom_activity_type_id) ?? "Unbekannt",
+        user_id: ca.user_id,
+        date_created: ca.date_created,
+        fields: ca.fields ?? {},
+      })),
+      "close_id"
+    );
+    totalRecords += customActs.length;
 
-    // Sync-Log abschließen
     if (syncId) {
       await supabase
         .from("sync_log")
@@ -153,11 +164,7 @@ export async function GET(request: Request) {
         .eq("id", syncId);
     }
 
-    return NextResponse.json({
-      ok: true,
-      records: totalRecords,
-      delta: !!since,
-    });
+    return NextResponse.json({ ok: true, records: totalRecords, delta: !!lastSync });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
 
