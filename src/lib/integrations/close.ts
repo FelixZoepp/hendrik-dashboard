@@ -276,16 +276,34 @@ export interface CloseCustomActivity {
 export async function fetchCustomActivities(
   since?: Date,
 ): Promise<CloseCustomActivity[]> {
-  const params: Record<string, string> = {};
-  if (since) {
-    params.date_created__gte = since.toISOString();
+  // Erst alle Custom Activity Types holen
+  const types = await fetchCustomActivityTypes();
+  if (types.length === 0) return [];
+
+  // Pro Type die Activities fetchen
+  const allActivities: CloseCustomActivity[] = [];
+  for (const type of types) {
+    const params: Record<string, string> = {};
+    if (since) {
+      params.date_created__gte = since.toISOString();
+    }
+
+    try {
+      const activities = await fetchAllPaginated<CloseCustomActivity>(
+        `/activity/${type.id}/`,
+        params,
+      );
+      // Type-Name mitgeben
+      for (const a of activities) {
+        a.custom_activity_type_id = type.id;
+      }
+      allActivities.push(...activities);
+    } catch {
+      // Typ hat vielleicht keine Activities, ignorieren
+    }
   }
 
-  // Fetch all custom activities
-  return fetchAllPaginated<CloseCustomActivity>(
-    "/activity/custom_activity/",
-    params,
-  );
+  return allActivities;
 }
 
 /**
@@ -298,8 +316,13 @@ export interface CloseCustomActivityType {
 }
 
 export async function fetchCustomActivityTypes(): Promise<CloseCustomActivityType[]> {
-  const response = await closeApi<{ data: CloseCustomActivityType[] }>(
-    "/custom_activity/",
-  );
-  return response.data;
+  try {
+    const response = await closeApi<{ data: CloseCustomActivityType[] }>(
+      "/custom_activity_type/",
+    );
+    return response.data;
+  } catch {
+    // Falls der Endpoint nicht existiert, leeres Array
+    return [];
+  }
 }
