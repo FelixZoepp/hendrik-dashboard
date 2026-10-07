@@ -1,17 +1,25 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { addDays, subDays } from "date-fns";
 import { createAdminClient } from "@/lib/supabase/admin";
-
-import { SalesDashboard } from "./sales-dashboard";
-import { PeriodFilter } from "@/components/ui/period-filter";
+import { fetchAll } from "@/lib/supabase/fetch-all";
+import { fetchCloseTotals } from "@/lib/integrations/close";
 import { getDaysFromSearchParams } from "@/lib/period-utils";
-import { subDays } from "date-fns";
+import {
+  buildReport,
+  type CCall,
+  type CEvent,
+  type CMeta,
+  type COpp,
+  type CSync,
+  type CUser,
+} from "@/lib/controlling";
+import { PeriodFilter } from "@/components/ui/period-filter";
+import { ControllingView } from "./controlling-view";
 
-export const metadata: Metadata = {
-  title: "Sales",
-};
-
+export const metadata: Metadata = { title: "Sales-Controlling" };
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export default async function SalesPage({
   searchParams,
@@ -19,81 +27,104 @@ export default async function SalesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const supabase = createAdminClient();
-  const params = await searchParams;
-  const days = getDaysFromSearchParams(params);
+  const days = getDaysFromSearchParams(await searchParams);
+  const now = new Date();
+  const allTime = days >= 9999;
+  const periodStart = allTime ? new Date("2000-01-01T00:00:00Z") : subDays(now, days);
+  const prevStart = allTime ? null : subDays(now, days * 2);
+  const loadFrom = (prevStart ?? periodStart).toISOString();
 
-  const since = subDays(new Date(), days).toISOString();
-  const sinceDate = subDays(new Date(), days).toISOString().split("T")[0];
-
-  const prevStart = subDays(new Date(), days * 2).toISOString();
-  const prevEnd = since;
-  const prevDate = subDays(new Date(), days * 2).toISOString().split("T")[0];
-  const prevEndDate = sinceDate;
-
-  const [
-    usersRes, leadsRes, oppsRes, activitiesRes, calendlyRes, metaRes,
-    customActRes,
-    prevLeadsRes, prevOppsRes, prevCalendlyRes, prevMetaRes,
-  ] = await Promise.all([
-    supabase.from("close_users").select("*"),
-    supabase.from("close_leads").select("*").gte("date_created", since),
-    supabase.from("close_opportunities").select("*").gte("date_created", since),
-    supabase.from("close_activities").select("*").gte("date_created", since),
-    supabase.from("calendly_events").select("*").gte("scheduled_at", since),
-    supabase.from("meta_ad_insights").select("spend").gte("date", sinceDate),
-    // Custom Activities (Gesprächsprotokolle)
-    supabase.from("close_custom_activities").select("*").gte("date_created", since),
-    // Vorperiode
-    supabase.from("close_leads").select("close_id").gte("date_created", prevStart).lt("date_created", prevEnd),
-    supabase.from("close_opportunities").select("close_id, value, status_type").gte("date_created", prevStart).lt("date_created", prevEnd),
-    supabase.from("calendly_events").select("calendly_uri, status, no_show").gte("scheduled_at", prevStart).lt("scheduled_at", prevEnd),
-    supabase.from("meta_ad_insights").select("spend").gte("date", prevDate).lt("date", prevEndDate),
-  ]);
-
-  const metaSpend = (metaRes.data ?? []).reduce(
-    (sum: number, r: { spend: number }) => sum + Number(r.spend), 0
-  );
-
-  const prevLeads = (prevLeadsRes.data ?? []).length;
-  const prevWon = (prevOppsRes.data ?? []).filter((o: { status_type: string }) => o.status_type === "won");
-  const prevUmsatz = prevWon.reduce((s: number, o: { value: number }) => s + (o.value ?? 0), 0);
-  const prevCalendly = (prevCalendlyRes.data ?? []);
-  const prevShows = prevCalendly.filter((e: { status: string; no_show: boolean }) => e.status === "active" && !e.no_show).length;
-  const prevMetaSpend = (prevMetaRes.data ?? []).reduce(
-    (sum: number, r: { spend: number }) => sum + Number(r.spend), 0
-  );
-
-  const prevPeriod = {
-    leads: prevLeads,
-    closes: prevWon.length,
-    umsatz: prevUmsatz,
-    termineWahrgenommen: prevShows,
-    metaSpend: prevMetaSpend,
+  const count = async (table: string, filter?: (q: any) => any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
+    let q = supabase.from(table).select("*", { count: "exact", head: true });
+    if (filter) q = filter(q);
+    const { count: c } = await q;
+    return c ?? null;
   };
+
+  const [users, opps, calls, events, meta, syncsRes, leadsNew, leadsNewPrev, dbTotals, closeTotals] =
+    await Promise.all([
+      fetchAll<CUser>(() => supabase.from("close_users").select("close_id, name, email").order("close_id")),
+      fetchAll<COpp>(() =>
+        supabase
+          .from("close_opportunities")
+          .select("close_id, lead_id, value, status_type, status_label, confidence, user_id, date_won, date_created", { count: "exact" })
+          .order("close_id")
+      ),
+      fetchAll<CCall>(() =>
+        supabase
+          .from("close_activities")
+          .select("lead_id, user_id, duration, disposition, direction, date_created", { count: "exact" })
+          .eq("type", "call")
+          .gte("date_created", loadFrom)
+          .order("close_id")
+      ),
+      fetchAll<CEvent>(() =>
+        supabase
+          .from("calendly_events")
+          .select("calendly_uri, event_type_name, invitee_name, invitee_email, status, no_show, canceled_by, cancel_reason, scheduled_at, created_at, host_email, utm", { count: "exact" })
+          .gte("scheduled_at", loadFrom)
+          .lte("scheduled_at", addDays(now, 60).toISOString())
+          .order("calendly_uri")
+      ),
+      fetchAll<CMeta>(() =>
+        supabase
+          .from("meta_ad_insights")
+          .select("date, campaign_name, spend, impressions, clicks, leads", { count: "exact" })
+          .gte("date", loadFrom.split("T")[0])
+          .order("id")
+      ),
+      supabase
+        .from("sync_log")
+        .select("source, started_at, finished_at, status, records, error")
+        .order("started_at", { ascending: false })
+        .limit(30),
+      count("close_leads", (q) => q.gte("date_created", periodStart.toISOString())),
+      prevStart
+        ? count("close_leads", (q) =>
+            q.gte("date_created", prevStart.toISOString()).lt("date_created", periodStart.toISOString())
+          )
+        : Promise.resolve(null),
+      Promise.all([
+        count("close_leads"),
+        count("close_opportunities"),
+        count("close_opportunities", (q) => q.eq("status_type", "won")),
+        count("close_activities"),
+        count("calendly_events"),
+      ]).then(([leads, opportunities, won, activities, ev]) => ({ leads, opportunities, won, activities, events: ev })),
+      fetchCloseTotals().catch(() => null),
+    ]);
+
+  const report = buildReport({
+    days,
+    now,
+    periodStart,
+    prevStart,
+    users,
+    opps,
+    calls,
+    events,
+    meta,
+    leadsNew: leadsNew ?? 0,
+    leadsNewPrev,
+    syncs: (syncsRes.data ?? []) as CSync[],
+    dbTotals,
+    closeTotals,
+  });
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Sales-Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            {days >= 9999 ? "Alle Daten" : `Letzte ${days} Tage`} — Close + Calendly
+          <h1 className="fern-page-title">Sales-Controlling</h1>
+          <p className="mt-1 text-[15px] text-muted-foreground">
+            {report.periodLabel} — Close, Calendly &amp; Meta Ads in einer Sicht.
           </p>
         </div>
         <Suspense>
           <PeriodFilter />
         </Suspense>
       </div>
-      <SalesDashboard
-        users={usersRes.data ?? []}
-        leads={leadsRes.data ?? []}
-        opportunities={oppsRes.data ?? []}
-        activities={activitiesRes.data ?? []}
-        calendlyEvents={calendlyRes.data ?? []}
-        customActivities={customActRes.data ?? []}
-        metaSpend={metaSpend}
-        prevPeriod={prevPeriod}
-      />
+      <ControllingView report={report} />
     </div>
   );
 }

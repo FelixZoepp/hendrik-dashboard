@@ -32,8 +32,11 @@ export async function GET(request: Request) {
       .limit(1)
       .single();
 
+    // 7 Tage Überlappung: Meta rechnet Conversions nachträglich zu
     const since = lastSync?.finished_at
-      ? lastSync.finished_at.split("T")[0]
+      ? new Date(new Date(lastSync.finished_at).getTime() - 7 * 86400_000)
+          .toISOString()
+          .split("T")[0]
       : undefined; // fetchAdInsights defaults to 90 days
 
     const insights = await fetchAdInsights(since ? { since } : undefined);
@@ -65,9 +68,10 @@ export async function GET(request: Request) {
 
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
-      await supabase
+      const { error } = await supabase
         .from("meta_ad_insights")
         .upsert(batch, { onConflict: "date,campaign_id,adset_name,ad_name" });
+      if (error) throw new Error(`Upsert meta_ad_insights: ${error.message}`);
     }
 
     totalRecords = rows.length;

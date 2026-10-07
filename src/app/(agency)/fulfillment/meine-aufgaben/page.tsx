@@ -69,14 +69,14 @@ export default async function MeineAufgabenPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Meine Aufgaben</h1>
+        <h1 className="fern-page-title">Meine Aufgaben</h1>
         <p className="text-sm text-muted-foreground">
           {totalTasks} Aufgabe{totalTasks !== 1 ? "n" : ""} zugewiesen
         </p>
       </div>
 
       {totalTasks === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-8 text-center">
           <p className="text-sm font-medium">Keine Aufgaben</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Dir sind aktuell keine Aufgaben zugewiesen.
@@ -104,7 +104,7 @@ export default async function MeineAufgabenPage() {
                       <Link
                         key={task.id}
                         href={`/fulfillment/${task.project_id}`}
-                        className="flex items-center justify-between rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50"
+                        className="flex items-center justify-between fern-card p-5 transition-colors hover:bg-accent/50"
                       >
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate">

@@ -76,7 +76,7 @@ export function FulfillmentBoard({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Fulfillment</h1>
+          <h1 className="fern-page-title">Fulfillment</h1>
           <p className="text-sm text-muted-foreground">
             {projects.length} Projekte · {companies.length} aktive Kunden
           </p>
@@ -114,7 +114,7 @@ export function FulfillmentBoard({
                       <Link
                         key={project.id}
                         href={`/fulfillment/${project.id}`}
-                        className="block rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50"
+                        className="block fern-card p-5 transition-colors hover:bg-accent/50"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">

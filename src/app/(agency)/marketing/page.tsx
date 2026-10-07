@@ -47,7 +47,7 @@ export default async function MarketingPage({
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Marketing-Dashboard</h1>
+          <h1 className="fern-page-title">Marketing-Dashboard</h1>
           <p className="text-sm text-muted-foreground">
             {days >= 9999 ? "Alle Daten" : `Letzte ${days} Tage`} — Meta Ads
           </p>

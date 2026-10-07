@@ -90,7 +90,7 @@ export function CourseDetail({
       </Link>
 
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">{course.titel}</h1>
+        <h1 className="fern-page-title">{course.titel}</h1>
         {course.beschreibung && (
           <p className="mt-1 text-sm text-muted-foreground">
             {course.beschreibung}
@@ -98,7 +98,7 @@ export function CourseDetail({
         )}
       </div>
 
-      <div className="divide-y rounded-lg border bg-card">
+      <div className="divide-y fern-card">
         {lessons.map((lesson) => {
           const done = completedIds.has(lesson.id);
           // Freischaltung: freigeschaltet_ab = 0 heißt sofort verfügbar

@@ -30,7 +30,7 @@ export default async function ClientDashboardPage() {
   if (!companyId) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+        <h1 className="fern-page-title">Dashboard</h1>
         <p className="text-sm text-muted-foreground">
           Dein Konto ist noch keinem Unternehmen zugeordnet.
         </p>
@@ -97,7 +97,7 @@ export default async function ClientDashboardPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dein Dashboard</h1>
+        <h1 className="fern-page-title">Dein Dashboard</h1>
         <p className="text-muted-foreground text-sm">
           Übersicht über deine Leads und Kennzahlen.
         </p>
@@ -106,7 +106,7 @@ export default async function ClientDashboardPage() {
         {kpis.map((kpi) => (
           <div
             key={kpi.label}
-            className="rounded-lg border bg-card p-4 text-card-foreground"
+            className="fern-card p-6 text-card-foreground"
           >
             <p className="text-xs text-muted-foreground">{kpi.label}</p>
             <p
@@ -122,7 +122,7 @@ export default async function ClientDashboardPage() {
       </div>
 
       {total === 0 && (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-8 text-center">
           <p className="text-sm font-medium">Noch keine Leads</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Sobald deine Kampagne live ist, erscheinen hier deine Anfragen.

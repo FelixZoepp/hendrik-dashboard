@@ -163,7 +163,7 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
       {/* Kopf */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="fern-page-title">
             {project.companies?.name}
           </h1>
           <div className="mt-1 flex items-center gap-2">
@@ -244,13 +244,13 @@ export function ProjectDetail({ project, sops }: ProjectDetailProps) {
           </Button>
         </div>
         {tasks.length === 0 ? (
-          <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+          <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-8 text-center">
             <p className="text-sm text-muted-foreground">
               Keine Aufgaben angelegt.
             </p>
           </div>
         ) : (
-          <div className="divide-y rounded-lg border bg-card">
+          <div className="divide-y fern-card">
             {tasks.map((task) => {
               const statusConfig =
                 TASK_STATUS[task.status] ?? TASK_STATUS.offen;

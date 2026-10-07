@@ -155,13 +155,13 @@ export function SlaOverview({ slaData, companies }: SlaOverviewProps) {
     <div className="space-y-6">
       {/* Globale KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border bg-card p-4">
+        <div className="fern-card p-6">
           <p className="text-xs text-muted-foreground">Leads gesamt</p>
           <p className="mt-1 text-2xl font-bold font-mono">
             {globalStats.totalLeads}
           </p>
         </div>
-        <div className="rounded-lg border bg-card p-4">
+        <div className="fern-card p-6">
           <p className="text-xs text-muted-foreground">Ø Reaktionszeit</p>
           <p
             className={cn(
@@ -172,7 +172,7 @@ export function SlaOverview({ slaData, companies }: SlaOverviewProps) {
             {formatMinuten(globalStats.avgMinuten)}
           </p>
         </div>
-        <div className="rounded-lg border bg-card p-4">
+        <div className="fern-card p-6">
           <p className="text-xs text-muted-foreground">Median</p>
           <p
             className={cn(
@@ -183,7 +183,7 @@ export function SlaOverview({ slaData, companies }: SlaOverviewProps) {
             {formatMinuten(globalStats.medianMinuten)}
           </p>
         </div>
-        <div className="rounded-lg border bg-card p-4">
+        <div className="fern-card p-6">
           <p className="text-xs text-muted-foreground">Unter 15 Min.</p>
           <p className="mt-1 text-2xl font-bold font-mono">
             {globalStats.unter15Anteil.toFixed(0)}%
@@ -225,13 +225,13 @@ export function SlaOverview({ slaData, companies }: SlaOverviewProps) {
       <div>
         <h2 className="text-sm font-medium mb-3">Pro Kunde</h2>
         {companyStats.length === 0 ? (
-          <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+          <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-8 text-center">
             <p className="text-sm text-muted-foreground">
               Noch keine Lead-Daten vorhanden.
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="overflow-x-auto fern-card">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50">

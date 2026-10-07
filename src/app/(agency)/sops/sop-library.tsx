@@ -41,7 +41,7 @@ export function SopLibrary({ sops }: { sops: Sop[] }) {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">SOP-Bibliothek</h1>
+          <h1 className="fern-page-title">SOP-Bibliothek</h1>
           <p className="text-sm text-muted-foreground">
             {sops.length} Anleitungen
           </p>
@@ -58,7 +58,7 @@ export function SopLibrary({ sops }: { sops: Sop[] }) {
       </div>
 
       {grouped.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-12 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-12 text-center">
           <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/50" />
           <p className="mt-2 text-sm text-muted-foreground">
             {search
@@ -73,7 +73,7 @@ export function SopLibrary({ sops }: { sops: Sop[] }) {
               <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 {kategorie}
               </h2>
-              <div className="divide-y rounded-lg border bg-card">
+              <div className="divide-y fern-card">
                 {items.map((sop) => (
                   <Link
                     key={sop.id}

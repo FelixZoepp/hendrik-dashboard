@@ -93,7 +93,7 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Team</h1>
+        <h1 className="fern-page-title">Team</h1>
         <p className="text-sm text-muted-foreground">
           {filtered.length}{" "}
           {filtered.length === 1 ? "Mitglied" : "Mitglieder"}
@@ -133,7 +133,7 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
 
       {/* Team member list */}
       {filtered.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-8 text-center">
           <p className="text-sm text-muted-foreground">
             Keine Teammitglieder gefunden.
           </p>
@@ -145,7 +145,7 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
             return (
               <div
                 key={member.id}
-                className="flex items-center gap-3 rounded-lg border bg-card p-4"
+                className="flex items-center gap-3 fern-card p-6"
               >
                 <Avatar>
                   <AvatarFallback>

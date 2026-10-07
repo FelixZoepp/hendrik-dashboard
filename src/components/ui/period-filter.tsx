@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 const PERIODS = [
   { label: "7T", value: "7" },
@@ -23,17 +23,21 @@ export function PeriodFilter() {
   }
 
   return (
-    <div className="flex items-center gap-1 rounded-md border bg-muted p-0.5">
+    <div className="inline-flex items-center gap-1 rounded-full bg-card p-1.5 shadow-[0_1px_2px_rgb(22_26_23/0.04),0_8px_24px_-12px_rgb(22_26_23/0.08)]">
       {PERIODS.map((p) => (
-        <Button
+        <button
           key={p.value}
-          variant={current === p.value ? "default" : "ghost"}
-          size="sm"
-          className="h-6 px-2 text-xs"
+          type="button"
           onClick={() => handleChange(p.value)}
+          className={cn(
+            "rounded-full px-4 py-2 text-sm transition-colors",
+            current === p.value
+              ? "fern-btn-primary font-medium text-white"
+              : "text-muted-foreground hover:text-foreground"
+          )}
         >
           {p.label}
-        </Button>
+        </button>
       ))}
     </div>
   );

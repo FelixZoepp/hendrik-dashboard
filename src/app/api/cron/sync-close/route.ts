@@ -7,6 +7,7 @@ import {
   fetchUsers,
   fetchCustomActivities,
   fetchCustomActivityTypes,
+  closeUserName,
 } from "@/lib/integrations/close";
 import { subDays } from "date-fns";
 
@@ -22,7 +23,8 @@ async function batchUpsert(
   const BATCH_SIZE = 500;
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
-    await supabase.from(table).upsert(batch, { onConflict });
+    const { error } = await supabase.from(table).upsert(batch, { onConflict });
+    if (error) throw new Error(`Upsert ${table}: ${error.message}`);
   }
 }
 
@@ -44,19 +46,23 @@ export async function GET(request: Request) {
   let totalRecords = 0;
 
   try {
-    // Delta: letzter erfolgreicher Sync, sonst 90 Tage
+    // Delta: Start des letzten erfolgreichen Syncs (minus 1h Puffer), sonst 90 Tage.
+    // ?full=1 erzwingt einen kompletten Abgleich der letzten 365 Tage.
+    const full = new URL(request.url).searchParams.get("full") === "1";
     const { data: lastSync } = await supabase
       .from("sync_log")
-      .select("finished_at")
+      .select("started_at")
       .eq("source", "close")
       .eq("status", "success")
-      .order("finished_at", { ascending: false })
+      .order("started_at", { ascending: false })
       .limit(1)
       .single();
 
-    const since = lastSync?.finished_at
-      ? new Date(lastSync.finished_at)
-      : subDays(new Date(), 90);
+    const since = full
+      ? subDays(new Date(), 365)
+      : lastSync?.started_at
+        ? new Date(new Date(lastSync.started_at).getTime() - 3600_000)
+        : subDays(new Date(), 90);
 
     // 1. Users
     const users = await fetchUsers();
@@ -65,7 +71,7 @@ export async function GET(request: Request) {
       "close_users",
       users.map((u) => ({
         close_id: u.id,
-        name: `${u.first_name} ${u.last_name}`.trim(),
+        name: closeUserName(u),
         email: u.email,
       })),
       "close_id"
@@ -86,14 +92,20 @@ export async function GET(request: Request) {
         date_updated: l.date_updated,
         lead_source: l.lead_source ?? null,
         assigned_user: l.assigned_to ?? null,
-        custom_fields: l.custom ?? {},
+        custom_fields: {
+          ...(l.custom ?? {}),
+          // Kontakt-E-Mails für die Zuordnung Calendly-Termin → Lead → Setter
+          _contact_emails: (l.contacts ?? [])
+            .flatMap((c) => c.emails ?? [])
+            .map((e) => e.email.toLowerCase()),
+        },
       })),
       "close_id"
     );
     totalRecords += leads.length;
 
-    // 3. Opportunities
-    const opps = await fetchOpportunities(since);
+    // 3. Opportunities — immer komplett, damit Statuswechsel (gewonnen/verloren) ankommen
+    const opps = await fetchOpportunities();
     await batchUpsert(
       supabase,
       "close_opportunities",
@@ -114,7 +126,8 @@ export async function GET(request: Request) {
     totalRecords += opps.length;
 
     // 4. Activities
-    const activities = await fetchActivities(since);
+    // Activities ändern sich nachträglich kaum — im Full-Modus reicht eine Woche
+    const activities = await fetchActivities(full ? subDays(new Date(), 7) : since);
     await batchUpsert(
       supabase,
       "close_activities",
@@ -164,7 +177,7 @@ export async function GET(request: Request) {
         .eq("id", syncId);
     }
 
-    return NextResponse.json({ ok: true, records: totalRecords, delta: !!lastSync });
+    return NextResponse.json({ ok: true, records: totalRecords, full, since: since.toISOString() });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
 

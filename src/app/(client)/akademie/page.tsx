@@ -46,14 +46,14 @@ export default async function AkademiePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Akademie</h1>
+        <h1 className="fern-page-title">Akademie</h1>
         <p className="text-sm text-muted-foreground">
           Lerne, wie du das Beste aus deinen Anfragen machst.
         </p>
       </div>
 
       {courses.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-12 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-12 text-center">
           <GraduationCap className="mx-auto h-8 w-8 text-muted-foreground/50" />
           <p className="mt-2 text-sm text-muted-foreground">
             Kurse werden in Kürze freigeschaltet.
@@ -75,7 +75,7 @@ export default async function AkademiePage() {
               <Link
                 key={course.id}
                 href={`/akademie/${course.id}`}
-                className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent/50"
+                className="fern-card p-6 transition-colors hover:bg-accent/50"
               >
                 <div className="flex items-start justify-between">
                   <GraduationCap className="h-5 w-5 text-primary shrink-0" />

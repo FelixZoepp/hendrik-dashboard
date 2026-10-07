@@ -20,6 +20,7 @@ export interface CloseLead {
   lead_source?: string;
   custom?: Record<string, unknown>;
   assigned_to?: string;
+  contacts?: Array<{ emails?: Array<{ email: string }> }>;
 }
 
 export interface CloseOpportunity {
@@ -33,6 +34,7 @@ export interface CloseOpportunity {
   date_won?: string;
   user_id: string;
   date_created: string;
+  date_updated?: string;
 }
 
 export interface CloseActivity {
@@ -48,9 +50,15 @@ export interface CloseActivity {
 
 export interface CloseUser {
   id: string;
-  first_name: string;
-  last_name: string;
+  first_name: string | null;
+  last_name: string | null;
   email: string;
+}
+
+/** Anzeigename: Vor-/Nachname, sonst E-Mail-Präfix (statt "null null"). */
+export function closeUserName(u: CloseUser): string {
+  const name = [u.first_name, u.last_name].filter(Boolean).join(" ").trim();
+  return name || u.email?.split("@")[0] || u.id;
 }
 
 interface PaginatedResponse<T> {
@@ -200,7 +208,8 @@ export async function fetchLeads(since?: Date): Promise<CloseLead[]> {
 }
 
 /**
- * Fetch all opportunities, optionally filtered by date_created since a given date.
+ * Fetch opportunities. Ohne `since` kommen alle — so werden auch Status-
+ * wechsel (z.B. aktiv → gewonnen) älterer Deals übernommen.
  */
 export async function fetchOpportunities(
   since?: Date,
@@ -208,10 +217,34 @@ export async function fetchOpportunities(
   const params: Record<string, string> = {};
 
   if (since) {
-    params.date_created__gte = since.toISOString();
+    params.date_updated__gte = since.toISOString();
   }
 
   return fetchAllPaginated<CloseOpportunity>("/opportunity/", params);
+}
+
+/** Live-Summen direkt aus Close für den Datenabgleich. */
+export async function fetchCloseTotals(): Promise<{
+  leads: number | null;
+  opportunities: number | null;
+  wonOpportunities: number | null;
+}> {
+  async function total(path: string, params: Record<string, string> = {}) {
+    try {
+      const res = await closeApi<PaginatedResponse<unknown>>(path, {
+        params: { ...params, _limit: "1" },
+      });
+      return res.total_results ?? null;
+    } catch {
+      return null;
+    }
+  }
+  const [leads, opportunities, wonOpportunities] = await Promise.all([
+    total("/lead/"),
+    total("/opportunity/"),
+    total("/opportunity/", { status_type: "won" }),
+  ]);
+  return { leads, opportunities, wonOpportunities };
 }
 
 /**
@@ -280,17 +313,17 @@ export async function fetchCustomActivities(
   const types = await fetchCustomActivityTypes();
   if (types.length === 0) return [];
 
-  // Pro Type die Activities fetchen
+  // Pro Type die Activities fetchen (Endpoint: /activity/custom/?custom_activity_type_id=…)
   const allActivities: CloseCustomActivity[] = [];
   for (const type of types) {
-    const params: Record<string, string> = {};
+    const params: Record<string, string> = { custom_activity_type_id: type.id };
     if (since) {
       params.date_created__gte = since.toISOString();
     }
 
     try {
       const activities = await fetchAllPaginated<CloseCustomActivity>(
-        `/activity/${type.id}/`,
+        "/activity/custom/",
         params,
       );
       // Type-Name mitgeben

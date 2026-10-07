@@ -49,7 +49,7 @@ export default async function KundenStatusPage() {
   if (!companyId) {
     return (
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold tracking-tight">Projektstatus</h1>
+        <h1 className="fern-page-title">Projektstatus</h1>
         <p className="text-sm text-muted-foreground">
           Dein Konto ist noch keinem Unternehmen zugeordnet.
         </p>
@@ -68,14 +68,14 @@ export default async function KundenStatusPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Projektstatus</h1>
+        <h1 className="fern-page-title">Projektstatus</h1>
         <p className="text-sm text-muted-foreground">
           Transparenter Überblick über den Fortschritt deiner Projekte.
         </p>
       </div>
 
       {projects.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-8 text-center">
           <p className="text-sm font-medium">Noch keine Projekte</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Sobald dein Onboarding abgeschlossen ist, erscheinen hier deine
@@ -96,7 +96,7 @@ export default async function KundenStatusPage() {
             return (
               <div
                 key={project.id}
-                className="rounded-lg border bg-card p-4 space-y-3"
+                className="fern-card p-6 space-y-3"
               >
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2">

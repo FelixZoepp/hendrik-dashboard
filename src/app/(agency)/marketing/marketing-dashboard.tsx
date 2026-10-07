@@ -146,7 +146,7 @@ export function MarketingDashboard({
   return (
     <div className="space-y-6">
       {!hasData ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-12 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-12 text-center">
           <p className="text-sm font-medium">Noch keine Ad-Daten</p>
           <p className="mt-1 text-xs text-muted-foreground">
             Daten werden nach Anbindung der Werbekonten synchronisiert.
@@ -177,9 +177,9 @@ export function MarketingDashboard({
             ] as { label: string; value: string }[])
               .filter((k) => k.value !== "0" && k.value !== "0 €" && k.value !== "0,0%" && k.value !== "—")
               .map((kpi) => (
-                <div key={kpi.label} className="rounded-lg border bg-card p-3">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{kpi.label}</p>
-                  <p className="mt-0.5 text-xl font-bold font-mono">{kpi.value}</p>
+                <div key={kpi.label} className="fern-card p-5">
+                  <p className="text-sm text-muted-foreground">{kpi.label}</p>
+                  <p className="mt-2 text-3xl font-semibold tracking-tight">{kpi.value}</p>
                 </div>
               ))}
           </div>
@@ -188,7 +188,7 @@ export function MarketingDashboard({
           {campaigns.length > 0 && (
             <div>
               <h2 className="text-sm font-medium mb-3">Kampagnen</h2>
-              <div className="overflow-x-auto rounded-lg border">
+              <div className="overflow-x-auto fern-card">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">
@@ -221,7 +221,7 @@ export function MarketingDashboard({
           {googleByCompany.length > 0 && (
             <div>
               <h2 className="text-sm font-medium mb-3">Google Ads (Kunden)</h2>
-              <div className="overflow-x-auto rounded-lg border">
+              <div className="overflow-x-auto fern-card">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/50">

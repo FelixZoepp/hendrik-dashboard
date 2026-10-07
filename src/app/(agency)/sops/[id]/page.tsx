@@ -61,7 +61,7 @@ export default async function SopDetailPage({
             v{sop.version}
           </span>
         </div>
-        <h1 className="text-2xl font-bold tracking-tight">{sop.titel}</h1>
+        <h1 className="fern-page-title">{sop.titel}</h1>
       </div>
 
       {/* Markdown-Inhalt als einfaches HTML rendern */}

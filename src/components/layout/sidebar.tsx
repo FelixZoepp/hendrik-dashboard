@@ -4,154 +4,64 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@/lib/types/database";
-import {
-  BarChart3,
-  ClipboardList,
-  FolderKanban,
-  BookOpen,
-  FileText,
-  Timer,
-  Megaphone,
-  Users,
-  Building2,
-  LayoutDashboard,
-  GraduationCap,
-  Download,
-  Kanban,
-  type LucideIcon,
-} from "lucide-react";
-
-interface NavItem {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  roles: UserRole[];
-}
-
-const NAV_ITEMS: NavItem[] = [
-  // Agentur
-  {
-    label: "Sales",
-    href: "/sales",
-    icon: BarChart3,
-    roles: ["admin", "sales"],
-  },
-  {
-    label: "Marketing",
-    href: "/marketing",
-    icon: Megaphone,
-    roles: ["admin"],
-  },
-  {
-    label: "Fulfillment",
-    href: "/fulfillment",
-    icon: FolderKanban,
-    roles: ["admin", "fulfillment"],
-  },
-  {
-    label: "SOPs",
-    href: "/sops",
-    icon: BookOpen,
-    roles: ["admin", "sales", "fulfillment"],
-  },
-  {
-    label: "Reaktionszeiten",
-    href: "/sla",
-    icon: Timer,
-    roles: ["admin"],
-  },
-  {
-    label: "Kunden",
-    href: "/kunden",
-    icon: Building2,
-    roles: ["admin"],
-  },
-  {
-    label: "Team",
-    href: "/team",
-    icon: Users,
-    roles: ["admin"],
-  },
-  // Kunden
-  {
-    label: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    roles: ["client_owner", "client_member"],
-  },
-  {
-    label: "Leads",
-    href: "/leads",
-    icon: ClipboardList,
-    roles: ["client_owner", "client_member"],
-  },
-  {
-    label: "Akademie",
-    href: "/akademie",
-    icon: GraduationCap,
-    roles: ["client_owner", "client_member"],
-  },
-  {
-    label: "Downloads",
-    href: "/downloads",
-    icon: Download,
-    roles: ["client_owner", "client_member"],
-  },
-  {
-    label: "Projektstatus",
-    href: "/status",
-    icon: Kanban,
-    roles: ["client_owner", "client_member"],
-  },
-  {
-    label: "Formulare",
-    href: "/forms/after-close",
-    icon: FileText,
-    roles: ["client_owner"],
-  },
-];
+import { RefreshCw } from "lucide-react";
+import { Brand } from "./brand";
+import { navGroupsFor, isActivePath } from "./nav-config";
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname();
-  const items = NAV_ITEMS.filter((item) => item.roles.includes(role));
+  const groups = navGroupsFor(role);
 
   return (
-    <aside className="hidden lg:flex lg:w-60 lg:flex-col lg:border-r lg:border-sidebar-border lg:bg-sidebar lg:backdrop-blur-xl">
-      <div className="flex h-14 items-center border-b border-sidebar-border px-4">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold">
-            H
-          </div>
-          <span className="text-sm font-semibold text-primary">
-            Hoffman Solutions
-          </span>
-        </Link>
+    <aside className="hidden lg:flex lg:w-64 lg:shrink-0 lg:flex-col lg:rounded-[1.75rem] lg:bg-sidebar lg:px-5 lg:py-6">
+      <div className="px-2">
+        <Brand />
       </div>
-      <nav className="flex-1 overflow-y-auto px-3 py-3">
-        <ul className="space-y-0.5">
-          {items.map((item) => {
-            const isActive =
-              pathname === item.href ||
-              pathname.startsWith(item.href + "/");
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
-                    isActive
-                      ? "bg-primary/10 text-primary font-medium"
-                      : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  )}
-                >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  {item.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+      <nav className="mt-8 flex-1 space-y-7 overflow-y-auto">
+        {groups.map((group) => (
+          <div key={group.label}>
+            <p className="px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              {group.label}
+            </p>
+            <ul className="mt-3 space-y-1">
+              {group.items.map((item) => {
+                const active = isActivePath(pathname, item.href);
+                return (
+                  <li key={item.href} className="relative">
+                    {active && (
+                      <span className="absolute -left-5 top-1/2 h-8 w-1 -translate-y-1/2 rounded-r-full bg-primary" />
+                    )}
+                    <Link
+                      href={item.href}
+                      className={cn(
+                        "flex items-center gap-3 rounded-xl px-2 py-2 text-[15px] transition-colors",
+                        active
+                          ? "font-semibold text-foreground"
+                          : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+                      )}
+                    >
+                      <item.icon
+                        className={cn("size-5 shrink-0", active && "text-primary")}
+                        strokeWidth={active ? 2.25 : 1.75}
+                      />
+                      {item.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
+      <div className="fern-hero mt-6 p-5">
+        <span className="flex size-8 items-center justify-center rounded-full bg-white text-primary">
+          <RefreshCw className="size-4" />
+        </span>
+        <p className="mt-4 text-lg font-medium leading-tight">Live-Daten</p>
+        <p className="mt-1 text-xs text-white/70">
+          Close, Calendly &amp; Meta Ads — täglich synchronisiert
+        </p>
+      </div>
     </aside>
   );
 }

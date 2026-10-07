@@ -36,14 +36,14 @@ export default async function DownloadsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Downloads</h1>
+        <h1 className="fern-page-title">Downloads</h1>
         <p className="text-sm text-muted-foreground">
           Checklisten, Vorlagen und Materialien für dich.
         </p>
       </div>
 
       {items.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 p-12 text-center">
+        <div className="rounded-3xl border-2 border-dashed border-border bg-card/60 p-12 text-center">
           <FolderOpen className="mx-auto h-8 w-8 text-muted-foreground/50" />
           <p className="mt-2 text-sm text-muted-foreground">
             Downloads werden in Kürze bereitgestellt.
@@ -56,7 +56,7 @@ export default async function DownloadsPage() {
               <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
                 {kategorie}
               </h2>
-              <div className="divide-y rounded-lg border bg-card">
+              <div className="divide-y fern-card">
                 {categoryItems.map((item) => (
                   <a
                     key={item.id}

@@ -116,7 +116,7 @@ export function LeadDetail({ lead, activities, assigneeName, isStaff }: LeadDeta
       <div className="space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="fern-page-title">
               {lead.vorname} {lead.nachname}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">

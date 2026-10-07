@@ -13,54 +13,17 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import type { UserRole } from "@/lib/types/database";
-import {
-  BarChart3,
-  ClipboardList,
-  FolderKanban,
-  BookOpen,
-  FileText,
-  Timer,
-  Megaphone,
-  Users,
-  Building2,
-  LayoutDashboard,
-  GraduationCap,
-  Download,
-  Kanban,
-  type LucideIcon,
-} from "lucide-react";
 import { useState } from "react";
-
-interface NavItem {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  roles: UserRole[];
-}
-
-const NAV_ITEMS: NavItem[] = [
-  { label: "Sales", href: "/sales", icon: BarChart3, roles: ["admin", "sales"] },
-  { label: "Marketing", href: "/marketing", icon: Megaphone, roles: ["admin"] },
-  { label: "Fulfillment", href: "/fulfillment", icon: FolderKanban, roles: ["admin", "fulfillment"] },
-  { label: "SOPs", href: "/sops", icon: BookOpen, roles: ["admin", "sales", "fulfillment"] },
-  { label: "Reaktionszeiten", href: "/sla", icon: Timer, roles: ["admin"] },
-  { label: "Kunden", href: "/kunden", icon: Building2, roles: ["admin"] },
-  { label: "Team", href: "/team", icon: Users, roles: ["admin"] },
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["client_owner", "client_member"] },
-  { label: "Leads", href: "/leads", icon: ClipboardList, roles: ["client_owner", "client_member"] },
-  { label: "Akademie", href: "/akademie", icon: GraduationCap, roles: ["client_owner", "client_member"] },
-  { label: "Downloads", href: "/downloads", icon: Download, roles: ["client_owner", "client_member"] },
-  { label: "Projektstatus", href: "/status", icon: Kanban, roles: ["client_owner", "client_member"] },
-  { label: "Formulare", href: "/forms/after-close", icon: FileText, roles: ["client_owner"] },
-];
+import { Brand } from "./brand";
+import { navGroupsFor, isActivePath } from "./nav-config";
 
 export function MobileNav({ role }: { role: UserRole }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const items = NAV_ITEMS.filter((item) => item.roles.includes(role));
+  const items = navGroupsFor(role).flatMap((g) => g.items);
 
   return (
-    <div className="flex h-14 items-center border-b border-border bg-background/80 backdrop-blur-xl px-4 lg:hidden">
+    <div className="flex h-14 items-center bg-background px-4 lg:hidden">
       <Sheet open={open} onOpenChange={setOpen}>
         <SheetTrigger
           render={<Button variant="ghost" size="icon" className="-ml-2" />}
@@ -68,31 +31,26 @@ export function MobileNav({ role }: { role: UserRole }) {
           <Menu className="h-5 w-5" />
           <span className="sr-only">Navigation öffnen</span>
         </SheetTrigger>
-        <SheetContent side="left" className="w-64 p-0 backdrop-blur-xl">
-          <SheetHeader className="border-b border-border px-4 py-3">
-            <SheetTitle className="flex items-center gap-2 text-left text-sm">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary text-primary-foreground text-xs font-bold">
-                H
-              </div>
-              <span className="text-primary font-semibold">Hoffman Solutions</span>
+        <SheetContent side="left" className="w-72 p-0">
+          <SheetHeader className="px-5 py-5">
+            <SheetTitle className="text-left">
+              <Brand />
             </SheetTitle>
           </SheetHeader>
           <nav className="px-3 py-3">
             <ul className="space-y-0.5">
               {items.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  pathname.startsWith(item.href + "/");
+                const isActive = isActivePath(pathname, item.href);
                 return (
                   <li key={item.href}>
                     <Link
                       href={item.href}
                       onClick={() => setOpen(false)}
                       className={cn(
-                        "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] transition-colors",
                         isActive
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-foreground/70 hover:bg-accent hover:text-accent-foreground"
+                          ? "bg-accent text-primary font-semibold"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       )}
                     >
                       <item.icon className="h-4 w-4 shrink-0" />
@@ -105,7 +63,7 @@ export function MobileNav({ role }: { role: UserRole }) {
           </nav>
         </SheetContent>
       </Sheet>
-      <span className="ml-2 text-sm font-semibold text-primary">Hoffman Solutions</span>
+      <div className="ml-2"><Brand /></div>
     </div>
   );
 }

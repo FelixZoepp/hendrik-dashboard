@@ -14,7 +14,7 @@ interface LeadListProps {
 export function LeadList({ leads }: LeadListProps) {
   if (leads.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 px-4 py-12 text-center">
+      <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-border bg-card/60 px-4 py-12 text-center">
         <p className="text-sm font-medium text-foreground">Keine Leads</p>
         <p className="mt-1 text-xs text-muted-foreground">
           Sobald neue Anfragen eingehen, erscheinen sie hier.
@@ -24,7 +24,7 @@ export function LeadList({ leads }: LeadListProps) {
   }
 
   return (
-    <div className="divide-y rounded-lg border bg-card">
+    <div className="divide-y fern-card">
       {leads.map((lead) => {
         const config = LEAD_STATUS_CONFIG[lead.status];
         return (

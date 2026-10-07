@@ -18,7 +18,7 @@ export function LeadCard({ lead, href }: LeadCardProps) {
   return (
     <Link
       href={href}
-      className="block rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50 group"
+      className="block fern-card p-5 transition-colors hover:bg-accent/50 group"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
