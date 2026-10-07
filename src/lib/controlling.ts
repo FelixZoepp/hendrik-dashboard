@@ -2,6 +2,7 @@
 // Läuft serverseitig — an den Client gehen nur die fertigen Kennzahlen.
 
 import { categorizeCancelReason } from "@/lib/sales-utils";
+import { berlinDateString, berlinDayStart, type Period } from "@/lib/period-utils";
 
 // ---------------------------------------------------------------------------
 // Eingangsdaten
@@ -68,10 +69,7 @@ export interface CSync {
 }
 
 export interface ControllingInput {
-  days: number;
-  now: Date;
-  periodStart: Date;
-  prevStart: Date | null;
+  period: Period;
   users: CUser[];
   opps: COpp[]; // alle Opportunities
   calls: CCall[]; // Calls ab prevStart (bzw. periodStart)
@@ -197,6 +195,41 @@ export interface TrendPunkt {
   vorperiodeErst: number | null;
 }
 
+export interface Quoten {
+  anrufe: number;
+  erreicht: number;
+  gespraeche: number;
+}
+
+export interface ErreichbarkeitSlot extends Quoten {
+  tag: number; // Mo=0
+  stunde: number;
+}
+
+export interface OpenerErreichbarkeit extends Quoten {
+  closeId: string;
+  name: string;
+  aktiveTage: number;
+  anrufeProTag: number | null;
+  termine: number; // gesetzte Termine (Setter-Zuordnung)
+  stunden: (Quoten & { stunde: number })[];
+  wochentage: (Quoten & { tag: number })[];
+  besteStunden: (Quoten & { stunde: number })[];
+  schwaechsteStunde: (Quoten & { stunde: number }) | null;
+}
+
+export interface Erreichbarkeit {
+  minAnrufe: number; // Mindestmenge, ab der eine Quote als belastbar gilt
+  gesamt: Quoten;
+  slots: ErreichbarkeitSlot[];
+  stunden: (Quoten & { stunde: number })[];
+  wochentage: (Quoten & { tag: number })[];
+  besteSlots: ErreichbarkeitSlot[];
+  schwaechsteSlots: ErreichbarkeitSlot[];
+  buchungenProStunde: { stunde: number; count: number }[];
+  opener: OpenerErreichbarkeit[];
+}
+
 export interface Warnung {
   level: "rot" | "gelb";
   text: string;
@@ -204,6 +237,9 @@ export interface Warnung {
 
 export interface ControllingReport {
   periodLabel: string;
+  rangeLabel: string;
+  prevRangeLabel: string | null;
+  trendEinheit: string;
   hasPrev: boolean;
   kpis: {
     umsatz: Kpi;
@@ -239,6 +275,7 @@ export interface ControllingReport {
     setterZugeordnet: number;
     termineMitEmail: number;
   };
+  erreichbarkeit: Erreichbarkeit;
   warnungen: Warnung[];
 }
 
@@ -247,9 +284,12 @@ export interface ControllingReport {
 // ---------------------------------------------------------------------------
 
 export function buildReport(input: ControllingInput): ControllingReport {
-  const { now, periodStart, prevStart, days } = input;
+  const { period } = input;
+  const now = period.end;
+  const periodStart = period.start;
+  const prevStart = period.prevStart;
+  const prevEnd = period.prevEnd ?? periodStart;
   const hasPrev = prevStart !== null;
-  const prevEnd = periodStart;
 
   const usersByEmail = new Map(
     input.users.filter((u) => u.email).map((u) => [u.email!.toLowerCase(), u])
@@ -263,8 +303,13 @@ export function buildReport(input: ControllingInput): ControllingReport {
   const kommendeEvents = input.events
     .filter((e) => e.status === "active" && new Date(e.scheduled_at) >= now)
     .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
-  const meta = input.meta.filter((m) => inRange(`${m.date}T12:00:00Z`, periodStart, now));
-  const metaPrev = hasPrev ? input.meta.filter((m) => inRange(`${m.date}T12:00:00Z`, prevStart!, prevEnd)) : [];
+  // Meta liefert Tageswerte → Vergleich über Kalenderdaten (Berlin), Vorperiode = volle Tage davor
+  const dPeriod = berlinDateString(periodStart);
+  const dToday = berlinDateString(now);
+  const meta = input.meta.filter((m) => m.date >= dPeriod && m.date <= dToday);
+  const metaPrev = hasPrev
+    ? input.meta.filter((m) => m.date >= berlinDateString(prevStart!) && m.date < dPeriod)
+    : [];
 
   const won = input.opps.filter((o) => o.status_type === "won" && inRange(o.date_won, periodStart, now));
   const wonPrev = hasPrev
@@ -343,21 +388,48 @@ export function buildReport(input: ControllingInput): ControllingReport {
     kostenJe: adSpend > 0 && i >= 3 ? ratio(adSpend, s.count) : null,
   }));
 
-  // --- Trend (Tage bei 7T, sonst Wochen) ---
-  const bucketMs = days <= 14 ? 86400_000 : 7 * 86400_000;
-  const spanStart = days >= 9999
+  // --- Trend: Kalender-Buckets in Berlin (7T/30T: Tage, 90T: Wochen ab Montag, Max: Monate) ---
+  const einheit: "tag" | "woche" | "monat" = period.allTime ? "monat" : period.days <= 31 ? "tag" : "woche";
+  const dataStart = period.allTime
     ? new Date(Math.min(...input.events.map((e) => new Date(e.scheduled_at).getTime()), now.getTime()))
     : periodStart;
-  const nBuckets = Math.max(1, Math.ceil((now.getTime() - spanStart.getTime()) / bucketMs));
-  const fmt = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
-  const trend: TrendPunkt[] = Array.from({ length: Math.min(nBuckets, 60) }, (_, i) => {
-    const from = new Date(now.getTime() - (Math.min(nBuckets, 60) - i) * bucketMs);
-    const to = new Date(from.getTime() + bucketMs);
+  const buckets: { from: Date; to: Date; label: string }[] = [];
+  const fmtTag = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit", timeZone: "Europe/Berlin" });
+  const fmtMonat = new Intl.DateTimeFormat("de-DE", { month: "short", year: "2-digit", timeZone: "Europe/Berlin" });
+  if (einheit === "tag") {
+    for (let i = 0; i < period.days; i++) {
+      const from = berlinDayStart(periodStart, i);
+      buckets.push({ from, to: berlinDayStart(periodStart, i + 1), label: fmtTag.format(from) });
+    }
+  } else if (einheit === "woche") {
+    // erster Bucket beginnt am Periodenstart, danach jeweils Montag 00:00
+    let from = periodStart;
+    while (from < now) {
+      const dow = (new Date(from.getTime() + 12 * 3600_000).getUTCDay() + 6) % 7; // Mo=0 (Mittag vermeidet DST-Kanten)
+      const to = berlinDayStart(from, 7 - dow);
+      buckets.push({ from, to, label: `KW ${isoWeek(from)}` });
+      from = to;
+    }
+  } else {
+    let from = berlinDayStart(dataStart, 0);
+    const f = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit" }).format(d).split("-").map(Number);
+    const [y0, m0] = f(from);
+    for (let k = 0; ; k++) {
+      const start = k === 0 ? from : berlinDayStart(new Date(Date.UTC(y0, m0 - 1 + k, 1, 12)), 0);
+      if (start >= now) break;
+      const end = berlinDayStart(new Date(Date.UTC(y0, m0 + k, 1, 12)), 0);
+      buckets.push({ from: start, to: end, label: fmtMonat.format(start) });
+      from = end;
+    }
+  }
+  const shiftMs = period.prevStart ? periodStart.getTime() - period.prevStart.getTime() : 0;
+  const trend: TrendPunkt[] = buckets.map(({ from, to: rawTo, label }) => {
+    const to = rawTo > now ? now : rawTo;
     const ev = input.events.filter((e) => inRange(e.scheduled_at, from, to) && isShow(e));
-    const pf = new Date(from.getTime() - days * 86400_000);
-    const pt = new Date(to.getTime() - days * 86400_000);
+    const pf = new Date(from.getTime() - shiftMs);
+    const pt = new Date(to.getTime() - shiftMs);
     return {
-      label: fmt.format(from),
+      label,
       erst: ev.filter((e) => terminTyp(e.event_type_name) === "erst").length,
       strategie: ev.filter((e) => terminTyp(e.event_type_name) === "strategie").length,
       umsatz: sum(input.opps.filter((o) => o.status_type === "won" && inRange(o.date_won, from, to)), (o) => o.value ?? 0),
@@ -534,8 +606,15 @@ export function buildReport(input: ControllingInput): ControllingReport {
       text: "Noch keine Termine einem Setter zugeordnet — wird nach dem nächsten Close- und Calendly-Sync befüllt.",
     });
 
+  // --- Erreichbarkeit ---
+  const erreichbarkeit = buildErreichbarkeit(calls, events, input.users);
+
   return {
-    periodLabel: days >= 9999 ? "Gesamter Zeitraum" : `Letzte ${days} Tage`,
+    erreichbarkeit,
+    periodLabel: period.label,
+    rangeLabel: period.rangeLabel,
+    prevRangeLabel: period.prevRangeLabel,
+    trendEinheit: einheit === "tag" ? "pro Tag" : einheit === "woche" ? "pro Kalenderwoche" : "pro Monat",
     hasPrev,
     kpis,
     funnel,
@@ -567,5 +646,113 @@ export function buildReport(input: ControllingInput): ControllingReport {
       termineMitEmail: mitEmail.length,
     },
     warnungen,
+  };
+}
+
+/** ISO-Kalenderwoche eines Zeitpunkts (Berliner Datum). */
+function isoWeek(d: Date): number {
+  const [y, m, day] = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" })
+    .format(d)
+    .split("-")
+    .map(Number);
+  const t = new Date(Date.UTC(y, m - 1, day));
+  const dow = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - dow + 3);
+  // t ist jetzt der Donnerstag dieser Woche → Woche = Anzahl Donnerstage seit Jahresbeginn
+  const jan1 = Date.UTC(t.getUTCFullYear(), 0, 1);
+  return 1 + Math.floor((t.getTime() - jan1) / (7 * 86400_000));
+}
+
+// ---------------------------------------------------------------------------
+// Erreichbarkeit: Wann gehen Leads ans Telefon — gesamt und je Opener
+// ---------------------------------------------------------------------------
+
+const SLOT_MIN = 20; // Anrufe je Wochentag×Stunde
+const OPENER_STUNDE_MIN = 15; // Anrufe je Opener×Stunde
+
+function quoten(cs: CCall[]): Quoten {
+  return {
+    anrufe: cs.length,
+    erreicht: cs.filter(isReached).length,
+    gespraeche: cs.filter(isConversation).length,
+  };
+}
+
+const quote = (q: Quoten) => (q.anrufe > 0 ? q.erreicht / q.anrufe : 0);
+
+function nachStunde(cs: CCall[]) {
+  const m = new Map<number, CCall[]>();
+  for (const c of cs) {
+    const { stunde } = berlinSlot(c.date_created);
+    (m.get(stunde) ?? m.set(stunde, []).get(stunde)!).push(c);
+  }
+  return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([stunde, xs]) => ({ stunde, ...quoten(xs) }));
+}
+
+function nachTag(cs: CCall[]) {
+  const m = new Map<number, CCall[]>();
+  for (const c of cs) {
+    const { tag } = berlinSlot(c.date_created);
+    (m.get(tag) ?? m.set(tag, []).get(tag)!).push(c);
+  }
+  return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([tag, xs]) => ({ tag, ...quoten(xs) }));
+}
+
+function buildErreichbarkeit(calls: CCall[], events: CEvent[], users: CUser[]): Erreichbarkeit {
+  const slotMap = new Map<string, CCall[]>();
+  for (const c of calls) {
+    const { tag, stunde } = berlinSlot(c.date_created);
+    const k = `${tag}-${stunde}`;
+    (slotMap.get(k) ?? slotMap.set(k, []).get(k)!).push(c);
+  }
+  const slots: ErreichbarkeitSlot[] = [...slotMap.entries()].map(([k, xs]) => {
+    const [tag, stunde] = k.split("-").map(Number);
+    return { tag, stunde, ...quoten(xs) };
+  });
+  const belastbar = slots.filter((s) => s.anrufe >= SLOT_MIN);
+  const sortiert = [...belastbar].sort((a, b) => quote(b) - quote(a) || b.anrufe - a.anrufe);
+
+  // Wann setzen die Opener Termine? (Buchungszeitpunkt der zugeordneten Termine)
+  const buch = new Map<number, number>();
+  for (const e of events) {
+    if (!e.utm?._setter_user_id || !e.created_at) continue;
+    const { stunde } = berlinSlot(e.created_at);
+    buch.set(stunde, (buch.get(stunde) ?? 0) + 1);
+  }
+
+  const opener: OpenerErreichbarkeit[] = users
+    .map((u) => {
+      const uc = calls.filter((c) => c.user_id === u.close_id);
+      const tage = new Set(
+        uc.map((c) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date(c.date_created)))
+      ).size;
+      const stunden = nachStunde(uc);
+      const fest = stunden.filter((h) => h.anrufe >= OPENER_STUNDE_MIN).sort((a, b) => quote(b) - quote(a));
+      return {
+        closeId: u.close_id,
+        name: u.name,
+        ...quoten(uc),
+        aktiveTage: tage,
+        anrufeProTag: tage > 0 ? uc.length / tage : null,
+        termine: events.filter((e) => e.utm?._setter_user_id === u.close_id).length,
+        stunden,
+        wochentage: nachTag(uc),
+        besteStunden: fest.slice(0, 3),
+        schwaechsteStunde: fest.length > 3 ? fest[fest.length - 1] : null,
+      };
+    })
+    .filter((o) => o.anrufe > 0)
+    .sort((a, b) => b.anrufe - a.anrufe);
+
+  return {
+    minAnrufe: SLOT_MIN,
+    gesamt: quoten(calls),
+    slots,
+    stunden: nachStunde(calls),
+    wochentage: nachTag(calls),
+    besteSlots: sortiert.slice(0, 5),
+    schwaechsteSlots: sortiert.slice(-3).reverse(),
+    buchungenProStunde: [...buch.entries()].sort((a, b) => a[0] - b[0]).map(([stunde, count]) => ({ stunde, count })),
+    opener,
   };
 }

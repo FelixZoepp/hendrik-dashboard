@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { addDays, subDays } from "date-fns";
+import { addDays } from "date-fns";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { fetchCloseTotals } from "@/lib/integrations/close";
-import { getDaysFromSearchParams } from "@/lib/period-utils";
+import { getDaysFromSearchParams, getPeriod, berlinDateString } from "@/lib/period-utils";
 import {
   buildReport,
   type CCall,
@@ -28,10 +28,8 @@ export default async function SalesPage({
 }) {
   const supabase = createAdminClient();
   const days = getDaysFromSearchParams(await searchParams);
-  const now = new Date();
-  const allTime = days >= 9999;
-  const periodStart = allTime ? new Date("2000-01-01T00:00:00Z") : subDays(now, days);
-  const prevStart = allTime ? null : subDays(now, days * 2);
+  const period = getPeriod(days);
+  const { end: now, start: periodStart, prevStart, prevEnd } = period;
   const loadFrom = (prevStart ?? periodStart).toISOString();
 
   const count = async (table: string, filter?: (q: any) => any) => { // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -70,7 +68,7 @@ export default async function SalesPage({
         supabase
           .from("meta_ad_insights")
           .select("date, campaign_name, spend, impressions, clicks, leads", { count: "exact" })
-          .gte("date", loadFrom.split("T")[0])
+          .gte("date", berlinDateString(prevStart ?? periodStart))
           .order("id")
       ),
       supabase
@@ -78,10 +76,10 @@ export default async function SalesPage({
         .select("source, started_at, finished_at, status, records, error")
         .order("started_at", { ascending: false })
         .limit(30),
-      count("close_leads", (q) => q.gte("date_created", periodStart.toISOString())),
-      prevStart
+      count("close_leads", (q) => q.gte("date_created", periodStart.toISOString()).lt("date_created", now.toISOString())),
+      prevStart && prevEnd
         ? count("close_leads", (q) =>
-            q.gte("date_created", prevStart.toISOString()).lt("date_created", periodStart.toISOString())
+            q.gte("date_created", prevStart.toISOString()).lt("date_created", prevEnd.toISOString())
           )
         : Promise.resolve(null),
       Promise.all([
@@ -95,10 +93,7 @@ export default async function SalesPage({
     ]);
 
   const report = buildReport({
-    days,
-    now,
-    periodStart,
-    prevStart,
+    period,
     users,
     opps,
     calls,
@@ -117,7 +112,8 @@ export default async function SalesPage({
         <div>
           <h1 className="fern-page-title">Sales-Controlling</h1>
           <p className="mt-1 text-[15px] text-muted-foreground">
-            {report.periodLabel} — Close, Calendly &amp; Meta Ads in einer Sicht.
+            {report.periodLabel} · {report.rangeLabel}
+            {report.prevRangeLabel && <> · Vergleich mit {report.prevRangeLabel}</>}
           </p>
         </div>
         <Suspense>

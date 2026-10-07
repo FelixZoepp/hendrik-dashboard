@@ -65,27 +65,27 @@
 }
 
 :root {
-  /* Fernly — Forest Green, Light */
-  --canvas: #eceeeb;
-  --background: #f5f6f4;
-  --foreground: #161a17;
-  --card: #fdfdfc;
-  --card-foreground: #161a17;
+  /* Hoffman — Blau (Logo #0b4aa8), Light */
+  --canvas: #eceef2;
+  --background: #f5f6f8;
+  --foreground: #14171c;
+  --card: #fdfdfe;
+  --card-foreground: #14171c;
   --popover: #ffffff;
-  --popover-foreground: #161a17;
-  --primary: #1f4a32;
-  --primary-strong: #163a27;
+  --popover-foreground: #14171c;
+  --primary: #0b4aa8;
+  --primary-strong: #083a87;
   --primary-foreground: #ffffff;
-  --secondary: #eef1ed;
-  --secondary-foreground: #1f2a22;
-  --muted: #f0f2ef;
-  --muted-foreground: #6b716c;
-  --accent: #e3efe5;
-  --accent-foreground: #1f4a32;
+  --secondary: #eef1f6;
+  --secondary-foreground: #1d2633;
+  --muted: #f0f2f6;
+  --muted-foreground: #6a7080;
+  --accent: #e3ebf8;
+  --accent-foreground: #0b4aa8;
   --destructive: #c0453a;
-  --border: #e5e8e3;
-  --input: #dfe3dd;
-  --ring: #3a7550;
+  --border: #e4e7ee;
+  --input: #dde1ea;
+  --ring: #2e6fd1;
   --radius: 1rem;
 
   --signal: #d99a2b;
@@ -99,43 +99,43 @@
   --sla-gelb: #e0a93b;
   --sla-rot: #c0453a;
 
-  --chart-1: #173b28;
-  --chart-2: #3a7550;
-  --chart-3: #78c297;
+  --chart-1: #0a2f6b;
+  --chart-2: #1f5fbf;
+  --chart-3: #7fa8e6;
   --chart-4: #e0a93b;
-  --chart-5: #a3a8a4;
+  --chart-5: #a3a8b4;
 
-  --sidebar: #f5f6f4;
-  --sidebar-foreground: #161a17;
-  --sidebar-primary: #1f4a32;
+  --sidebar: #f5f6f8;
+  --sidebar-foreground: #14171c;
+  --sidebar-primary: #0b4aa8;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eaede8;
-  --sidebar-accent-foreground: #161a17;
-  --sidebar-border: #e5e8e3;
-  --sidebar-ring: #3a7550;
+  --sidebar-accent: #e9edf4;
+  --sidebar-accent-foreground: #14171c;
+  --sidebar-border: #e4e7ee;
+  --sidebar-ring: #2e6fd1;
 }
 
 .dark {
-  --canvas: #0d110e;
-  --background: #131814;
-  --foreground: #eef1ee;
-  --card: #1a201b;
-  --card-foreground: #eef1ee;
-  --popover: #1a201b;
-  --popover-foreground: #eef1ee;
-  --primary: #5aa77a;
-  --primary-strong: #2f6b49;
-  --primary-foreground: #0d110e;
-  --secondary: #222a24;
-  --secondary-foreground: #eef1ee;
-  --muted: #222a24;
-  --muted-foreground: #9aa39c;
-  --accent: #23352a;
-  --accent-foreground: #cfe8d7;
+  --canvas: #0c0f14;
+  --background: #12161d;
+  --foreground: #eef1f6;
+  --card: #181d26;
+  --card-foreground: #eef1f6;
+  --popover: #181d26;
+  --popover-foreground: #eef1f6;
+  --primary: #6b9df0;
+  --primary-strong: #2f62b8;
+  --primary-foreground: #0c0f14;
+  --secondary: #212834;
+  --secondary-foreground: #eef1f6;
+  --muted: #212834;
+  --muted-foreground: #98a0b0;
+  --accent: #1e2c45;
+  --accent-foreground: #cfdcf5;
   --destructive: #e0675b;
-  --border: #2a322c;
-  --input: #2a322c;
-  --ring: #5aa77a;
+  --border: #29303c;
+  --input: #29303c;
+  --ring: #6b9df0;
 
   --signal: #e0a93b;
   --signal-foreground: #1a1205;
@@ -148,20 +148,20 @@
   --sla-gelb: #e0a93b;
   --sla-rot: #e0675b;
 
-  --chart-1: #8fd0a8;
-  --chart-2: #5aa77a;
-  --chart-3: #2f6b49;
+  --chart-1: #a9c6f5;
+  --chart-2: #6b9df0;
+  --chart-3: #2f62b8;
   --chart-4: #e0a93b;
-  --chart-5: #6b736d;
+  --chart-5: #6b7280;
 
-  --sidebar: #131814;
-  --sidebar-foreground: #eef1ee;
-  --sidebar-primary: #5aa77a;
-  --sidebar-primary-foreground: #0d110e;
-  --sidebar-accent: #222a24;
-  --sidebar-accent-foreground: #eef1ee;
-  --sidebar-border: #2a322c;
-  --sidebar-ring: #5aa77a;
+  --sidebar: #12161d;
+  --sidebar-foreground: #eef1f6;
+  --sidebar-primary: #6b9df0;
+  --sidebar-primary-foreground: #0c0f14;
+  --sidebar-accent: #212834;
+  --sidebar-accent-foreground: #eef1f6;
+  --sidebar-border: #29303c;
+  --sidebar-ring: #6b9df0;
 }
 
 @layer base {
@@ -179,7 +179,7 @@
 }
 
 @utility fern-btn-primary {
-  background-image: linear-gradient(180deg, #2d5e41 0%, #173b28 100%);
+  background-image: linear-gradient(180deg, #1f5fc4 0%, #0a3a8a 100%);
 }
 
 @layer components {
@@ -189,12 +189,12 @@
   .fern-card {
     @apply rounded-3xl bg-card shadow-[0_1px_2px_rgb(22_26_23/0.04),0_8px_24px_-12px_rgb(22_26_23/0.08)];
   }
-  /* Dunkelgrüne Hero-Fläche mit Ringmuster */
+  /* Blaue Hero-Fläche mit Ringmuster */
   .fern-hero {
     @apply relative overflow-hidden rounded-3xl text-white;
     background:
       repeating-radial-gradient(circle at 110% 120%, rgb(255 255 255 / 0.05) 0 1px, transparent 1px 22px),
-      linear-gradient(135deg, #2d5e41 0%, #173b28 60%, #10291c 100%);
+      linear-gradient(135deg, #1d5fc4 0%, #0b3f91 60%, #082d6b 100%);
   }
   .fern-page-title {
     @apply text-3xl font-semibold tracking-tight sm:text-4xl;

@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAll } from "@/lib/supabase/fetch-all";
 
-import { MarketingDashboard } from "./marketing-dashboard";
+import { MarketingDashboard, type MarketingDashboardProps } from "./marketing-dashboard";
 import { PeriodFilter } from "@/components/ui/period-filter";
-import { getDaysFromSearchParams } from "@/lib/period-utils";
-import { subDays } from "date-fns";
+import { getDaysFromSearchParams, getPeriod, berlinDateString } from "@/lib/period-utils";
 
 export const metadata: Metadata = { title: "Marketing" };
 export const dynamic = "force-dynamic";
@@ -19,28 +19,47 @@ export default async function MarketingPage({
   const params = await searchParams;
   const days = getDaysFromSearchParams(params);
 
-  const since = subDays(new Date(), days).toISOString().split("T")[0];
-  const sinceTs = subDays(new Date(), days).toISOString();
+  const period = getPeriod(days);
+  const since = berlinDateString(period.start);
+  const sinceTs = period.start.toISOString();
+  const untilTs = period.end.toISOString();
 
-  const [metaRes, googleRes, oppsRes, calendlyRes] = await Promise.all([
-    supabase
-      .from("meta_ad_insights")
-      .select("*")
-      .gte("date", since)
-      .order("date", { ascending: false }),
-    supabase
-      .from("google_ads_insights")
-      .select("*, companies(name)")
-      .gte("date", since)
-      .order("date", { ascending: false }),
-    supabase
-      .from("close_opportunities")
-      .select("value, status_type, lead_id, date_won")
-      .eq("status_type", "won"),
-    supabase
-      .from("calendly_events")
-      .select("event_type_name, status, no_show, scheduled_at")
-      .gte("scheduled_at", sinceTs),
+  const [meta, google, wonOpps, calendly] = await Promise.all([
+    fetchAll<MarketingDashboardProps["metaInsights"][number]>(() =>
+      supabase
+        .from("meta_ad_insights")
+        .select("*", { count: "exact" })
+        .gte("date", since)
+        .order("date", { ascending: false })
+        .order("id")
+    ),
+    fetchAll<MarketingDashboardProps["googleInsights"][number]>(() =>
+      supabase
+        .from("google_ads_insights")
+        .select("*, companies(name)", { count: "exact" })
+        .gte("date", since)
+        .order("date", { ascending: false })
+        .order("id")
+    ),
+    // Gewonnene Deals im Zeitraum (nach Abschlussdatum)
+    fetchAll<MarketingDashboardProps["wonOpportunities"][number]>(() =>
+      supabase
+        .from("close_opportunities")
+        .select("value, status_type, lead_id, date_won", { count: "exact" })
+        .eq("status_type", "won")
+        .gte("date_won", sinceTs)
+        .lt("date_won", untilTs)
+        .order("close_id")
+    ),
+    // nur bereits stattgefundene Zeitpunkte — der Sync lädt auch kommende Termine
+    fetchAll<MarketingDashboardProps["calendlyEvents"][number]>(() =>
+      supabase
+        .from("calendly_events")
+        .select("event_type_name, status, no_show, scheduled_at", { count: "exact" })
+        .gte("scheduled_at", sinceTs)
+        .lt("scheduled_at", untilTs)
+        .order("calendly_uri")
+    ),
   ]);
 
   return (
@@ -49,7 +68,7 @@ export default async function MarketingPage({
         <div>
           <h1 className="fern-page-title">Marketing-Dashboard</h1>
           <p className="text-sm text-muted-foreground">
-            {days >= 9999 ? "Alle Daten" : `Letzte ${days} Tage`} — Meta Ads
+            {period.label} · {period.rangeLabel} — Meta Ads
           </p>
         </div>
         <Suspense>
@@ -57,10 +76,10 @@ export default async function MarketingPage({
         </Suspense>
       </div>
       <MarketingDashboard
-        metaInsights={metaRes.data ?? []}
-        googleInsights={googleRes.data ?? []}
-        wonOpportunities={oppsRes.data ?? []}
-        calendlyEvents={calendlyRes.data ?? []}
+        metaInsights={meta}
+        googleInsights={google}
+        wonOpportunities={wonOpps}
+        calendlyEvents={calendly}
       />
     </div>
   );

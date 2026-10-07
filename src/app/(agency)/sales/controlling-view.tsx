@@ -22,9 +22,10 @@ import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatEuro, formatSeconds, TAGE_KURZ } from "@/lib/sales-utils";
 import type { ControllingReport, Kpi } from "@/lib/controlling";
+import { ErreichbarkeitView } from "./erreichbarkeit-view";
 
-// Zwei-Serien-Palette (validiert: CVD ΔE 12.5, normal ΔE 22.3)
-const SERIE_ERST = "#2f7a4f";
+// Zwei-Serien-Palette (validiert: CVD ΔE 30.5, normal ΔE 34.9)
+const SERIE_ERST = "#1f5fbf";
 const SERIE_STRAT = "#c98a1c";
 
 const num = (v: number | null, digits = 0) =>
@@ -311,7 +312,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
         <Section
           className="xl:col-span-2"
           title="Entwicklung"
-          subtitle="Stattgefundene Gespräche je Zeitraum"
+          subtitle={`Stattgefundene Gespräche ${r.trendEinheit}`}
           action={
             <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
@@ -383,6 +384,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
       <Tabs defaultValue="team">
         <TabsList>
           <TabsTrigger value="team">Team</TabsTrigger>
+          <TabsTrigger value="erreichbarkeit">Erreichbarkeit</TabsTrigger>
           <TabsTrigger value="termine">Termine</TabsTrigger>
           <TabsTrigger value="aktivitaet">Aktivität</TabsTrigger>
           <TabsTrigger value="marketing">Kampagnen</TabsTrigger>
@@ -419,6 +421,10 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
               />
             )}
           </Section>
+        </TabsContent>
+
+        <TabsContent value="erreichbarkeit" className="mt-4">
+          <ErreichbarkeitView data={r.erreichbarkeit} />
         </TabsContent>
 
         <TabsContent value="termine" className="mt-4 space-y-4">

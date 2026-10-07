@@ -42,7 +42,7 @@ interface CalendlyEvent {
   no_show: boolean;
 }
 
-interface MarketingDashboardProps {
+export interface MarketingDashboardProps {
   metaInsights: MetaInsight[];
   googleInsights: GoogleInsight[];
   wonOpportunities: WonOpp[];

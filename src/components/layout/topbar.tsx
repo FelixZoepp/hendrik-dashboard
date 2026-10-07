@@ -54,7 +54,7 @@ export function Topbar({
         <kbd className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium">⌘ K</kbd>
       </button>
       <div className="flex items-center gap-3">
-        <span className="flex size-10 items-center justify-center rounded-full bg-[#efd3c3] text-sm font-medium text-[#5b3424]">
+        <span className="flex size-10 items-center justify-center rounded-full bg-accent text-sm font-medium text-primary">
           {initials}
         </span>
         <span className="text-[15px] font-medium">{userName}</span>
