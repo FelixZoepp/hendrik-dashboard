@@ -37,17 +37,20 @@ const OPP = {
   verloren: "stat_7ZzzWHiE2qep8OKcGjELV6fGIIrpWgZbdYOY7tzFxdZ",
 };
 
-// Aktive Phasen der Setter-Closer-Pipeline — nur diese Opportunities werden bewegt
-const PIPELINE_AKTIV = new Set([
-  OPP.settingTerminiert,
-  OPP.settingNoShow,
-  OPP.settingFollowUp,
-  OPP.closingTerminiert,
-  OPP.closingNoShow,
-  OPP.closingFollowUp,
-  OPP.cc2Vereinbart,
-  OPP.angebotVersendet,
-]);
+// Rangfolge der Setter-Closer-Pipeline — Opportunities laufen nur vorwärts
+const RANG: Record<string, number> = {
+  [OPP.settingTerminiert]: 1,
+  [OPP.settingNoShow]: 1,
+  [OPP.settingFollowUp]: 1,
+  [OPP.closingTerminiert]: 2,
+  [OPP.closingNoShow]: 2,
+  [OPP.closingFollowUp]: 2,
+  [OPP.cc2Vereinbart]: 3,
+  [OPP.angebotVersendet]: 4,
+  [OPP.verkauft]: 5,
+  [OPP.verloren]: 5,
+};
+const ABGESCHLOSSEN = new Set([OPP.verkauft, OPP.verloren]);
 
 const LEAD = {
   interessiert: "stat_Aovea3A7R0A8m2vWAJF2sS7s44TM5VNldFh07t0wwqP",
@@ -61,15 +64,17 @@ const LEAD = {
 };
 
 interface Aktion {
-  /** Ziel-Status der Opportunity; existiert keine aktive, wird eine angelegt (außer bei Verloren) */
+  /** Ziel-Status der Opportunity; existiert keine aktive, wird eine angelegt (außer Verkauft/Verloren) */
   opp?: string;
   /** Kalender-Datum aus dem Protokoll als "Termin am" an die Opportunity schreiben */
   termin?: boolean;
   lead?: string;
   /** Kalender-Datum als "Follow-Up Datum" am Lead setzen */
   followUpDatum?: boolean;
-  /** Lead für X Monate sperren ("Gesperrt bis") */
+  /** Lead für X Monate sperren ("Gesperrt bis"), sofern im Protokoll kein Kalender-Datum steht */
   sperreMonate?: number;
+  /** Nur anwenden, solange der Lead noch nicht in der Setter-Closer-Pipeline läuft */
+  nurVorPipeline?: boolean;
 }
 
 // Protokoll-Typ → Feld "Nächster Schritt"/Ergebnis → Aktion
@@ -79,15 +84,15 @@ const REGELN: Record<string, Array<{ feld: string; werte: Record<string, Aktion>
       feld: FIELD.ccEntscheider,
       werte: {
         "Setting vereinbart am:": { opp: OPP.settingTerminiert, termin: true, lead: LEAD.setting },
-        "Interessiert - Anrufen am:": { lead: LEAD.interessiert, followUpDatum: true },
-        "Kein Interesse 3M:": { lead: LEAD.keinInteresse, sperreMonate: 3 },
-        "Kein Interesse 6M:": { lead: LEAD.keinInteresse, sperreMonate: 6 },
-        Disqualifiziert: { lead: LEAD.disqualifiziert },
+        "Interessiert - Anrufen am:": { lead: LEAD.interessiert, followUpDatum: true, nurVorPipeline: true },
+        "Kein Interesse 3M:": { lead: LEAD.keinInteresse, sperreMonate: 3, nurVorPipeline: true },
+        "Kein Interesse 6M:": { lead: LEAD.keinInteresse, sperreMonate: 6, nurVorPipeline: true },
+        Disqualifiziert: { lead: LEAD.disqualifiziert, nurVorPipeline: true },
       },
     },
     {
       feld: FIELD.ccGatekeeper,
-      werte: { Disqualifiziert: { lead: LEAD.disqualifiziert } },
+      werte: { Disqualifiziert: { lead: LEAD.disqualifiziert, nurVorPipeline: true } },
     },
   ],
   [PROTOKOLL.setting]: [
@@ -116,12 +121,30 @@ const REGELN: Record<string, Array<{ feld: string; werte: Record<string, Aktion>
   ],
 };
 
+
+export const maxDuration = 60;
+
 interface CloseWebhookEvent {
   event?: {
     object_type?: string;
+    object_id?: string;
     lead_id?: string;
     data?: Record<string, unknown>;
   };
+}
+
+interface Protokoll extends Record<string, unknown> {
+  id: string;
+  lead_id: string;
+  status: string;
+  custom_activity_type_id: string;
+  date_created: string;
+}
+
+interface Opportunity {
+  id: string;
+  status_id: string;
+  date_updated: string;
 }
 
 /** Close signiert mit HMAC-SHA256(hex-Key, timestamp + body). */
@@ -136,11 +159,11 @@ function verifySignature(body: string, timestamp: string | null, hash: string | 
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function findeAktion(data: Record<string, unknown>): Aktion | null {
-  const regeln = REGELN[data.custom_activity_type_id as string];
+function findeAktion(protokoll: Record<string, unknown>): Aktion | null {
+  const regeln = REGELN[protokoll.custom_activity_type_id as string];
   if (!regeln) return null;
   for (const { feld, werte } of regeln) {
-    const aktion = werte[data[feld] as string];
+    const aktion = werte[protokoll[feld] as string];
     if (aktion) return aktion;
   }
   return null;
@@ -148,50 +171,72 @@ function findeAktion(data: Record<string, unknown>): Aktion | null {
 
 /**
  * Close liefert Webhooks nicht garantiert in Reihenfolge. Gibt es zum Lead schon
- * ein neueres Protokoll, ist diese Meldung veraltet und darf nichts zurückdrehen.
+ * ein neueres Protokoll mit Aktion, ist dieses veraltet und darf nichts zurückdrehen.
  */
-async function istVeraltet(leadId: string, data: Record<string, unknown>) {
-  const { data: protokolle } = await closeApi<{
-    data: Array<{ id: string; custom_activity_type_id: string; status: string; date_created: string }>;
-  }>("/activity/custom/", { params: { lead_id: leadId } });
-  const eigenesDatum = new Date(data.date_created as string).getTime();
+async function istVeraltet(protokoll: Protokoll) {
+  const { data: protokolle } = await closeApi<{ data: Protokoll[] }>("/activity/custom/", {
+    params: { lead_id: protokoll.lead_id, date_created__gt: protokoll.date_created },
+  });
   return protokolle.some(
-    (p) =>
-      p.id !== data.id &&
-      p.status === "published" &&
-      p.custom_activity_type_id in REGELN &&
-      new Date(p.date_created).getTime() > eigenesDatum,
+    (p) => p.id !== protokoll.id && p.status === "published" && findeAktion(p) !== null,
   );
 }
 
-function inMonaten(monate: number): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() + monate);
+/** Datum (YYYY-MM-DD) in deutscher Zeit — für reine Datumsfelder. */
+function berlinerDatum(iso: string): string {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Berlin" }).format(new Date(iso));
+}
+
+/** Basis + X Monate, am Monatsende begrenzt (31.08. + 6 → 28./29.02.). */
+function plusMonate(basisIso: string, monate: number): string {
+  const d = new Date(basisIso);
+  const tag = d.getUTCDate();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() + monate);
+  const letzterTag = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  d.setUTCDate(Math.min(tag, letzterTag));
   return d.toISOString();
 }
 
-async function fuehreAus(leadId: string, aktion: Aktion, data: Record<string, unknown>) {
-  const kalender = (data[FIELD.kalender] as string | undefined) || null;
-  const gelegtAuf = (data[FIELD.gelegtAuf] as string | undefined) || null;
+async function fuehreAus(protokoll: Protokoll, aktion: Aktion) {
+  const leadId = protokoll.lead_id;
+  const kalender = (protokoll[FIELD.kalender] as string | undefined) || null;
+  const gelegtAuf = (protokoll[FIELD.gelegtAuf] as string | undefined) || null;
   const ergebnis: Record<string, unknown> = {};
 
+  const lead = await closeApi<{ status_id: string; opportunities: Opportunity[] }>(
+    `/lead/${leadId}/`,
+    { params: { _fields: "status_id,opportunities" } },
+  );
+  const pipelineOpps = lead.opportunities.filter((o) => o.status_id in RANG);
+  // Bei mehreren laufenden Deals nur den zuletzt bearbeiteten bewegen
+  const aktiv = pipelineOpps
+    .filter((o) => !ABGESCHLOSSEN.has(o.status_id))
+    .sort((a, b) => b.date_updated.localeCompare(a.date_updated))[0];
+
+  if (aktion.nurVorPipeline && (aktiv || lead.status_id === LEAD.kunde)) {
+    return { skipped: "Lead läuft bereits in der Pipeline" };
+  }
+
   if (aktion.opp) {
-    const { data: opps } = await closeApi<{ data: Array<{ id: string; status_id: string }> }>(
-      "/opportunity/",
-      { params: { lead_id: leadId } },
-    );
-    const aktive = opps.filter((o) => PIPELINE_AKTIV.has(o.status_id));
+    if (aktiv && RANG[aktion.opp] < RANG[aktiv.status_id]) {
+      return { skipped: "Opportunity ist schon weiter" };
+    }
 
     const update: Record<string, unknown> = { status_id: aktion.opp };
-    if (aktion.termin && kalender) update[FIELD.oppTerminAm] = kalender;
-    if (gelegtAuf) update.user_id = gelegtAuf;
+    if (aktion.termin) {
+      if (kalender) update[FIELD.oppTerminAm] = kalender;
+      if (gelegtAuf) update.user_id = gelegtAuf;
+    }
 
-    if (aktive.length > 0) {
-      for (const opp of aktive) {
-        await closeApi(`/opportunity/${opp.id}/`, { method: "PUT", body: update });
-      }
-      ergebnis.oppVerschoben = aktive.map((o) => o.id);
-    } else if (aktion.opp !== OPP.verloren) {
+    if (aktiv) {
+      await closeApi(`/opportunity/${aktiv.id}/`, { method: "PUT", body: update });
+      ergebnis.oppVerschoben = aktiv.id;
+    } else if (
+      // Neuer Deal nur beim Einstieg — oder wenn der Lead noch gar keinen in der Pipeline hat
+      aktion.opp === OPP.settingTerminiert ||
+      (pipelineOpps.length === 0 && !ABGESCHLOSSEN.has(aktion.opp))
+    ) {
       const neu = await closeApi<{ id: string }>("/opportunity/", {
         method: "POST",
         body: { lead_id: leadId, ...update },
@@ -201,20 +246,30 @@ async function fuehreAus(leadId: string, aktion: Aktion, data: Record<string, un
   }
 
   const leadUpdate: Record<string, unknown> = {};
-  if (aktion.lead) leadUpdate.status_id = aktion.lead;
-  if (aktion.followUpDatum && kalender) leadUpdate[FIELD.leadFollowUpDatum] = kalender.slice(0, 10);
-  if (aktion.sperreMonate) leadUpdate[FIELD.leadGesperrtBis] = inMonaten(aktion.sperreMonate);
+  if (aktion.lead && (lead.status_id !== LEAD.kunde || aktion.lead === LEAD.kunde)) {
+    leadUpdate.status_id = aktion.lead;
+  }
+  if (aktion.followUpDatum && kalender) leadUpdate[FIELD.leadFollowUpDatum] = berlinerDatum(kalender);
+  if (aktion.sperreMonate) {
+    leadUpdate[FIELD.leadGesperrtBis] =
+      kalender ?? plusMonate(protokoll.date_created, aktion.sperreMonate);
+  }
   if (Object.keys(leadUpdate).length > 0) {
     await closeApi(`/lead/${leadId}/`, { method: "PUT", body: leadUpdate });
     ergebnis.lead = leadUpdate;
   }
 
+  if (aktion.termin && !kalender) {
+    ergebnis.warnung = "Termin ohne Kalender-Datum";
+  }
   return ergebnis;
 }
 
 export async function POST(request: Request) {
   const body = await request.text();
   const supabase = createAdminClient();
+  const logFehler = (payload: Record<string, unknown>, error: string) =>
+    supabase.from("webhook_errors").insert({ endpoint: "close", payload, error });
 
   if (
     !verifySignature(
@@ -223,37 +278,44 @@ export async function POST(request: Request) {
       request.headers.get("close-sig-hash"),
     )
   ) {
-    await supabase.from("webhook_errors").insert({
-      endpoint: "close",
-      payload: { body: body.slice(0, 2000) },
-      error: "Ungültige Signatur",
-    });
+    await logFehler({ body: body.slice(0, 2000) }, "Ungültige Signatur");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const { event } = JSON.parse(body) as CloseWebhookEvent;
-  const data = event?.data ?? {};
-
-  if (event?.object_type !== "activity.custom_activity" || data.status !== "published") {
+  const activityId = event?.object_id ?? (event?.data?.id as string | undefined);
+  if (
+    event?.object_type !== "activity.custom_activity" ||
+    !activityId ||
+    !((event.data?.custom_activity_type_id as string) in REGELN)
+  ) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  const aktion = findeAktion(data);
-  const leadId = (data.lead_id as string | undefined) ?? event.lead_id;
-  if (!aktion || !leadId) return NextResponse.json({ ok: true, skipped: true });
-
   try {
-    if (await istVeraltet(leadId, data)) {
+    // Immer den aktuellen Stand aus Close nehmen — Webhook-Daten können veraltet sein
+    const protokoll = await closeApi<Protokoll>(`/activity/custom/${activityId}/`);
+    const aktion = findeAktion(protokoll);
+    if (protokoll.status !== "published" || !aktion) {
+      return NextResponse.json({ ok: true, skipped: true });
+    }
+    if (await istVeraltet(protokoll)) {
       return NextResponse.json({ ok: true, skipped: "neueres Protokoll vorhanden" });
     }
-    const ergebnis = await fuehreAus(leadId, aktion, data);
+
+    const ergebnis = await fuehreAus(protokoll, aktion);
+    if (ergebnis.warnung) {
+      await logFehler({ lead_id: protokoll.lead_id, activity_id: activityId }, String(ergebnis.warnung));
+    }
     return NextResponse.json({ ok: true, ...ergebnis });
   } catch (err) {
-    await supabase.from("webhook_errors").insert({
-      endpoint: "close",
-      payload: { lead_id: leadId, activity_id: data.id },
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return NextResponse.json({ error: "Update fehlgeschlagen" }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    await logFehler({ activity_id: activityId }, message);
+    // Dauerhafte Fehler (z.B. Lead gelöscht) quittieren, sonst wiederholt Close 72 h lang
+    const dauerhaft = /Close API error 4(?!29)\d\d/.test(message);
+    return NextResponse.json(
+      { error: "Update fehlgeschlagen" },
+      { status: dauerhaft ? 200 : 500 },
+    );
   }
 }
