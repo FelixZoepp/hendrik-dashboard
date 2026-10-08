@@ -75,6 +75,8 @@ interface Aktion {
   sperreMonate?: number;
   /** Nur anwenden, solange der Lead noch nicht in der Setter-Closer-Pipeline läuft */
   nurVorPipeline?: boolean;
+  /** Aufgabe mit diesem Text anlegen — fällig zum Kalender-Datum, für den Protokoll-Ersteller */
+  aufgabe?: string;
 }
 
 // Protokoll-Typ → Feld "Nächster Schritt"/Ergebnis → Aktion
@@ -84,7 +86,12 @@ const REGELN: Record<string, Array<{ feld: string; werte: Record<string, Aktion>
       feld: FIELD.ccEntscheider,
       werte: {
         "Setting vereinbart am:": { opp: OPP.settingTerminiert, termin: true, lead: LEAD.setting },
-        "Interessiert - Anrufen am:": { lead: LEAD.interessiert, followUpDatum: true, nurVorPipeline: true },
+        "Interessiert - Anrufen am:": {
+          lead: LEAD.interessiert,
+          followUpDatum: true,
+          nurVorPipeline: true,
+          aufgabe: "Rückruf: Lead ist interessiert",
+        },
         "Kein Interesse 3M:": { lead: LEAD.keinInteresse, sperreMonate: 3, nurVorPipeline: true },
         "Kein Interesse 6M:": { lead: LEAD.keinInteresse, sperreMonate: 6, nurVorPipeline: true },
         Disqualifiziert: { lead: LEAD.disqualifiziert, nurVorPipeline: true },
@@ -257,6 +264,28 @@ async function fuehreAus(protokoll: Protokoll, aktion: Aktion) {
   if (Object.keys(leadUpdate).length > 0) {
     await closeApi(`/lead/${leadId}/`, { method: "PUT", body: leadUpdate });
     ergebnis.lead = leadUpdate;
+  }
+
+  if (aktion.aufgabe) {
+    const faellig = kalender ?? berlinerDatum(new Date().toISOString());
+    // Bearbeitete Protokolle / Wiederholungen dürfen keine doppelte Aufgabe erzeugen
+    const { data: offene } = await closeApi<{ data: Array<{ text: string; date: string | null }> }>(
+      "/task/",
+      { params: { lead_id: leadId, is_complete: "false" } },
+    );
+    if (!offene.some((t) => t.text === aktion.aufgabe && t.date?.slice(0, 10) === faellig.slice(0, 10))) {
+      const aufgabe = await closeApi<{ id: string }>("/task/", {
+        method: "POST",
+        body: {
+          _type: "lead",
+          lead_id: leadId,
+          text: aktion.aufgabe,
+          date: faellig,
+          assigned_to: (protokoll.user_id as string | undefined) ?? undefined,
+        },
+      });
+      ergebnis.aufgabe = aufgabe.id;
+    }
   }
 
   if (aktion.termin && !kalender) {
