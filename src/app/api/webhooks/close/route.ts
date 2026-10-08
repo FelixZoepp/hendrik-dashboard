@@ -146,6 +146,24 @@ function findeAktion(data: Record<string, unknown>): Aktion | null {
   return null;
 }
 
+/**
+ * Close liefert Webhooks nicht garantiert in Reihenfolge. Gibt es zum Lead schon
+ * ein neueres Protokoll, ist diese Meldung veraltet und darf nichts zurückdrehen.
+ */
+async function istVeraltet(leadId: string, data: Record<string, unknown>) {
+  const { data: protokolle } = await closeApi<{
+    data: Array<{ id: string; custom_activity_type_id: string; status: string; date_created: string }>;
+  }>("/activity/custom/", { params: { lead_id: leadId } });
+  const eigenesDatum = new Date(data.date_created as string).getTime();
+  return protokolle.some(
+    (p) =>
+      p.id !== data.id &&
+      p.status === "published" &&
+      p.custom_activity_type_id in REGELN &&
+      new Date(p.date_created).getTime() > eigenesDatum,
+  );
+}
+
 function inMonaten(monate: number): string {
   const d = new Date();
   d.setMonth(d.getMonth() + monate);
@@ -225,6 +243,9 @@ export async function POST(request: Request) {
   if (!aktion || !leadId) return NextResponse.json({ ok: true, skipped: true });
 
   try {
+    if (await istVeraltet(leadId, data)) {
+      return NextResponse.json({ ok: true, skipped: "neueres Protokoll vorhanden" });
+    }
     const ergebnis = await fuehreAus(leadId, aktion, data);
     return NextResponse.json({ ok: true, ...ergebnis });
   } catch (err) {
