@@ -44,9 +44,30 @@ async function terminZurNachricht(svc: SupabaseClient, telefon: string, payload:
 }
 
 export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promise<Record<string, unknown>> {
-  const telefon = normalisiereTelefon(e.telefonRoh);
+  // Meta-Absender (wa_id) ist immer international ohne „+“ — keine Deutschland-Heuristik
+  const telefon = normalisiereTelefon(e.telefonRoh, "whatsapp");
   if (!telefon) return { ignoriert: "Nummer unbrauchbar" };
   const jetzt = e.zeit;
+
+  // STOP als ERSTES: Abmeldung speichern (Fehler → throw → Wiederholung), offene Jobs abbrechen
+  const istStop = !istOhneInhalt(e.typ) && !e.buttonPayload && erkenneAntwort(e.text) === "stop";
+  if (istStop) {
+    const { error: stopFehler } = await svc
+      .from("wa_kontakte")
+      .upsert({ telefon, opt_out: true, updated_at: jetzt.toISOString() }, { onConflict: "telefon" });
+    if (stopFehler) throw new Error(`Abmeldung nicht gespeichert: ${stopFehler.message}`);
+    const { data: offen, error: oFehler } = await svc
+      .from("wa_termine")
+      .select("id")
+      .eq("telefon", telefon)
+      .eq("status", "geplant");
+    if (oFehler) throw new Error(`Termine nicht lesbar: ${oFehler.message}`);
+    await brecheJobsAb(
+      svc,
+      ((offen ?? []) as Array<{ id: string }>).map((t) => t.id),
+      "Kontakt hat sich abgemeldet (STOP)",
+    );
+  }
 
   // Dedupe läuft über wa_eingang.status = 'verarbeitet'; ein erneuter Versuch nach Fehler darf hier durch
   const termin = await terminZurNachricht(svc, telefon, e.buttonPayload, jetzt);
@@ -89,18 +110,8 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
   const art =
     knopf === "bestaetigen" ? "bestaetigen" : knopf === "verschieben" ? "verschieben" : erkenneAntwort(e.text);
 
-  if (art === "stop") {
-    // Abmeldung zuerst sicher speichern — schlägt das fehl, wird der ganze Eingang wiederholt
-    const { error: stopFehler } = await svc
-      .from("wa_kontakte")
-      .upsert({ telefon, opt_out: true, updated_at: jetzt.toISOString() }, { onConflict: "telefon" });
-    if (stopFehler) throw new Error(`Abmeldung nicht gespeichert: ${stopFehler.message}`);
-    const { data: offen } = await svc.from("wa_termine").select("id").eq("telefon", telefon).eq("status", "geplant");
-    await brecheJobsAb(
-      svc,
-      ((offen ?? []) as Array<{ id: string }>).map((t) => t.id),
-      "Kontakt hat sich abgemeldet (STOP)",
-    );
+  if (istStop) {
+    // Abmeldung ist oben schon gespeichert; jetzt Bestätigung + Notiz
     await sendeFreitext(svc, { telefon, text: FREITEXTE.stop, termin, closeLeadId, pflichtAntwort: true });
     await notizSicher(closeLeadId, "WhatsApp abgemeldet (STOP) – der Bot sendet keine Nachrichten mehr an diese Nummer.");
     return { aktion: "stop" };

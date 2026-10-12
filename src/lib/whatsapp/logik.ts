@@ -125,6 +125,9 @@ export interface GeplanterJob {
   run_at: Date;
 }
 
+/** Mindestens so viel Restzeit muss vor jedem Job/Eingang bleiben (Meta- und Close-Zeitlimits je 10 s). */
+export const MIN_REST_MS = 15_000;
+
 /** Jobs, die mehr als so lange überfällig sind, werden nicht nachgeholt. */
 export const MAX_VERSPAETUNG_MS = 15 * MIN;
 
@@ -179,11 +182,22 @@ export function planeZeitplan(start: Date, jetzt: Date, art: TerminArt): Geplant
 // Telefon
 // ---------------------------------------------------------------------------
 
-/** Telefonnummer in E.164 (Deutschland als Standard). null, wenn unbrauchbar. */
-export function normalisiereTelefon(roh: string | null | undefined): string | null {
+/**
+ * Telefonnummer in E.164. null, wenn unbrauchbar.
+ * herkunft "eingabe" (Calendly/Close/Dashboard): Deutschland-Heuristik für Nummern ohne Vorwahl.
+ * herkunft "whatsapp" (Meta-Absender wa_id, z. B. "436641234567"): immer international ohne „+“.
+ */
+export function normalisiereTelefon(
+  roh: string | null | undefined,
+  herkunft: "eingabe" | "whatsapp" = "eingabe",
+): string | null {
   if (!roh) return null;
   const sauber = String(roh).replace(/[^\d+]/g, "");
   if (!sauber) return null;
+  if (herkunft === "whatsapp") {
+    const ziffern = sauber.replace(/\+/g, "");
+    return ziffern.length >= 8 && ziffern.length <= 15 && !ziffern.startsWith("0") ? `+${ziffern}` : null;
+  }
   let ziffern: string;
   if (sauber.startsWith("+")) ziffern = sauber.slice(1).replace(/\+/g, "");
   else if (sauber.startsWith("00")) ziffern = sauber.slice(2);
@@ -376,13 +390,18 @@ export const VERSCHIEBUNG_ANDERE_QUELLE_MS = 15 * MIN;
  *   (nie ein altes true behalten). Gleiche Nummer: gleiche Quelle → neuer Stand,
  *   andere Quelle → true, sobald eine Quelle es gibt.
  * - gleicheQuelle = Treffer über calendly_event_uri bzw. close_protokoll_id.
+ * - Hat der Termin eine Calendly-Buchung, überschreibt Close nie Start, Kontaktdaten oder
+ *   opt_in (ein true bleibt) — Close füllt dann nur Lücken.
  */
 export function zusammenfuehren(
   bestehend: TerminDaten,
   neu: TerminDaten,
   gleicheQuelle = false,
 ): ZusammenfuehrErgebnis {
-  const ueberschreiben = gleicheQuelle || neu.quelle === "calendly" || bestehend.quelle === "close";
+  // Calendly-Daten haben Vorrang — auch wenn der Treffer über die Close-Protokoll-ID kam
+  const calendlyGeschuetzt = !!bestehend.calendly_event_uri && neu.quelle !== "calendly";
+  const ueberschreiben =
+    !calendlyGeschuetzt && (gleicheQuelle || neu.quelle === "calendly" || bestehend.quelle === "close");
   const patch: Record<string, unknown> = {};
   for (const feld of TERMIN_FELDER) {
     const wert = neu[feld];
@@ -398,7 +417,7 @@ export function zusammenfuehren(
   let optIn = altOptIn;
   if (typeof patch.telefon === "string") optIn = !!neu.opt_in;
   else if (neu.telefon && neu.telefon === bestehend.telefon && neu.opt_in !== undefined) {
-    optIn = gleicheQuelle ? !!neu.opt_in : altOptIn || !!neu.opt_in;
+    optIn = gleicheQuelle && !calendlyGeschuetzt ? !!neu.opt_in : altOptIn || !!neu.opt_in;
   }
   if (optIn !== altOptIn) patch.opt_in = optIn;
 
@@ -457,18 +476,43 @@ export function darfStatusSetzen(alt: string | null | undefined, neu: string): b
 
 /**
  * Eindeutiger Versand-Schlüssel gegen Doppel-Versand (unique in wa_nachrichten).
- * „gebucht“: je Nummer, Art und Berliner Kalendertag — egal, ob die Quellen beim Start
- * leicht abweichen. Sonst: Nummer, Vorlage und Start (auf die Minute).
+ * „gebucht“: einmal je Termin. Sonst: Termin, Typ und Start — nach einer Verschiebung
+ * (neuer Start) darf z. B. die Erinnerung erneut kommen. Doppel zwischen Calendly und
+ * Close verhindert das Zusammenführen auf EINEN Termin.
  */
-export function versandSchluessel(
-  telefon: string,
-  vorlage: string,
-  typ: JobTyp,
-  art: TerminArt,
-  start: Date,
-): string {
-  if (typ === "gebucht") return `${telefon}|${art}|gebucht|${berlinDatum(start)}`;
-  return `${telefon}|${vorlage}|${start.toISOString().slice(0, 16)}`;
+export function versandSchluessel(terminId: string, typ: JobTyp, start: Date): string {
+  return typ === "gebucht" ? `${terminId}|gebucht` : `${terminId}|${typ}|${start.toISOString()}`;
+}
+
+export type JobAktion =
+  | { typ: JobTyp; aktion: "planen"; run_at: Date }
+  | { typ: JobTyp; aktion: "abbrechen" };
+
+/**
+ * Folge-Jobs (Erinnerung, Nachfassen, gleich) nach einer Startänderung.
+ * echteVerschiebung: unabhängig vom bisherigen Status neu planen (außer 'laeuft');
+ * sonst (kleine Abweichung beim Zusammenführen) nur noch geplante umrechnen.
+ * Jobs, die nicht mehr in den Plan passen, werden abgebrochen, sofern noch geplant.
+ * „gebucht“ ist nie dabei.
+ */
+export function folgeJobsNachStartaenderung(
+  bestehend: Array<{ typ: JobTyp; status: string }>,
+  plan: GeplanterJob[],
+  echteVerschiebung: boolean,
+): JobAktion[] {
+  const aktionen: JobAktion[] = [];
+  for (const typ of ["erinnerung", "unbestaetigt_check", "gleich"] as JobTyp[]) {
+    const job = bestehend.find((j) => j.typ === typ);
+    const neu = plan.find((p) => p.typ === typ);
+    if (neu) {
+      if (!job || job.status === "geplant" || (echteVerschiebung && job.status !== "laeuft")) {
+        aktionen.push({ typ, aktion: "planen", run_at: neu.run_at });
+      }
+    } else if (job?.status === "geplant") {
+      aktionen.push({ typ, aktion: "abbrechen" });
+    }
+  }
+  return aktionen;
 }
 
 /** „gleich“-Nachricht nur, wenn die Sendezeit höchstens 5 Min. vom Soll (Start − Vorlauf) abweicht. */

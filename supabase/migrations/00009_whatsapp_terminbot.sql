@@ -119,7 +119,8 @@ create table public.wa_nachrichten (
   vorlage         text,
   body            text,
   wa_message_id   text unique,
-  -- Versand-Reservierung gegen Doppel-Versand (Telefon|Vorlage|Termin); bei eindeutigem Fehler wieder null
+  -- Versand-Reservierung gegen Doppel-Versand (termin_id|gebucht bzw. termin_id|typ|start);
+  -- 'fehlgeschlagen' mit Schlüssel = sicher nicht gesendet → darf beim nächsten Versuch übernommen werden
   versand_schluessel text unique,
   status          text not null
                   check (status in ('reserviert', 'gesendet', 'zugestellt', 'gelesen', 'fehlgeschlagen', 'empfangen')),
@@ -139,8 +140,9 @@ create table public.wa_eingang (
   id             uuid primary key default gen_random_uuid(),
   wa_message_id  text not null unique,
   payload        jsonb not null,
-  status         text not null default 'neu' check (status in ('neu', 'verarbeitet', 'fehler')),
+  status         text not null default 'neu' check (status in ('neu', 'in_arbeit', 'verarbeitet', 'fehler')),
   versuche       integer not null default 0,
+  claimed_at     timestamptz,
   fehler         text,
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
@@ -225,3 +227,85 @@ $$;
 
 revoke all on function public.wa_jobs_claim(integer) from public, anon, authenticated;
 grant execute on function public.wa_jobs_claim(integer) to service_role;
+
+-- ------------------------------------------------------------
+-- Eingang atomar übernehmen (mehrere Verarbeiter parallel: Webhook-after() und Cron).
+-- Hängende 'in_arbeit' (> 5 Min.) gehen auf 'fehler' zurück und werden erneut versucht (< 5).
+-- p_ids gesetzt: genau diese Nachrichten (direkt nach dem Webhook);
+-- sonst: 'neu' älter als 2 Min. bzw. 'fehler' mit < 5 Versuchen.
+-- ------------------------------------------------------------
+create or replace function public.wa_eingang_claim(p_ids text[] default null, p_limit integer default 5)
+returns setof public.wa_eingang
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.wa_eingang
+     set status = 'fehler',
+         fehler = coalesce(fehler, 'Bearbeitung brach nach mehr als 5 Min. ab'),
+         updated_at = now()
+   where status = 'in_arbeit'
+     and claimed_at < now() - interval '5 minutes';
+
+  return query
+  update public.wa_eingang e
+     set status = 'in_arbeit',
+         claimed_at = now(),
+         versuche = e.versuche + 1,
+         updated_at = now()
+   where e.id in (
+     select x.id
+       from public.wa_eingang x
+      where x.versuche < 5
+        and (
+          (p_ids is not null and x.wa_message_id = any(p_ids) and x.status in ('neu', 'fehler'))
+          or (p_ids is null and x.status = 'neu' and x.created_at < now() - interval '2 minutes')
+          or (p_ids is null and x.status = 'fehler' and x.updated_at < now() - interval '2 minutes')
+        )
+      order by x.created_at
+      limit p_limit
+      for update skip locked
+   )
+  returning e.*;
+end;
+$$;
+
+revoke all on function public.wa_eingang_claim(text[], integer) from public, anon, authenticated;
+grant execute on function public.wa_eingang_claim(text[], integer) to service_role;
+
+-- ------------------------------------------------------------
+-- Admin-PIN: Fehlversuch atomar zählen (Zähler + Sperre in einer Anweisung)
+-- ------------------------------------------------------------
+create or replace function public.wa_pin_fehlversuch(p_max integer default 5, p_sperre interval default interval '15 minutes')
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v jsonb;
+begin
+  insert into public.wa_einstellungen as w (key, wert, updated_at)
+  values (
+    'pin_sperre',
+    case when p_max <= 1
+      then jsonb_build_object('fehlversuche', 0, 'gesperrt_bis', now() + p_sperre)
+      else jsonb_build_object('fehlversuche', 1, 'gesperrt_bis', null)
+    end,
+    now()
+  )
+  on conflict (key) do update
+     set wert = case
+           when coalesce((w.wert ->> 'fehlversuche')::integer, 0) + 1 >= p_max
+             then jsonb_build_object('fehlversuche', 0, 'gesperrt_bis', now() + p_sperre)
+           else jsonb_build_object('fehlversuche', coalesce((w.wert ->> 'fehlversuche')::integer, 0) + 1, 'gesperrt_bis', null)
+         end,
+         updated_at = now()
+  returning w.wert into v;
+  return v;
+end;
+$$;
+
+revoke all on function public.wa_pin_fehlversuch(integer, interval) from public, anon, authenticated;
+grant execute on function public.wa_pin_fehlversuch(integer, interval) to service_role;

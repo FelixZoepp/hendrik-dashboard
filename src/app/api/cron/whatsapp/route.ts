@@ -23,9 +23,11 @@ export async function GET(request: Request) {
 
   const supabase = createAdminClient();
   const antwort: Record<string, unknown> = {};
+  // Eine gemeinsame absolute Deadline für alle Phasen (maxDuration 60 s)
+  const deadline = Date.now() + 45_000;
 
   try {
-    antwort.eingang = await verarbeiteOffeneEingaenge(supabase, { budgetMs: 10_000 });
+    antwort.eingang = await verarbeiteOffeneEingaenge(supabase, { deadline });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "eingang" }, error: message });
@@ -33,7 +35,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    antwort.jobs = await verarbeiteJobs(supabase, { budgetMs: 35_000 });
+    antwort.jobs = await verarbeiteJobs(supabase, { deadline });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "jobs" }, error: message });
@@ -42,7 +44,7 @@ export async function GET(request: Request) {
 
   // Vorlagen-Status stündlich abgleichen (nur lesen)
   try {
-    if (waVerbindung().verbunden) {
+    if (waVerbindung().verbunden && deadline - Date.now() >= 15_000) {
       const e = await ladeEinstellungen(supabase);
       const zuletzt = e.vorlagen_abgleich_am ? new Date(e.vorlagen_abgleich_am).getTime() : 0;
       if (Date.now() - zuletzt > ABGLEICH_ALLE_MS) {

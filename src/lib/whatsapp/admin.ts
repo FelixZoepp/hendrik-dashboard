@@ -59,10 +59,25 @@ async function ladeSperre(): Promise<PinSperre> {
   return { fehlversuche: Number(w?.fehlversuche ?? 0), gesperrt_bis: w?.gesperrt_bis ?? null };
 }
 
-async function speichereSperre(s: PinSperre): Promise<void> {
-  await createAdminClient()
+/** Fehlversuch atomar zählen (SQL-Funktion: Zähler + Sperre in einer Anweisung). */
+async function zaehleFehlversuch(): Promise<PinSperre> {
+  const { data, error } = await createAdminClient().rpc("wa_pin_fehlversuch", {
+    p_max: MAX_FEHLVERSUCHE,
+    p_sperre: `${SPERRE_MS / 60_000} minutes`,
+  });
+  if (error) throw new Error(`Fehlversuch nicht gezählt: ${error.message}`);
+  const w = (data ?? {}) as Partial<PinSperre>;
+  return { fehlversuche: Number(w.fehlversuche ?? 0), gesperrt_bis: w.gesperrt_bis ?? null };
+}
+
+async function setzeSperreZurueck(): Promise<void> {
+  const { error } = await createAdminClient()
     .from("wa_einstellungen")
-    .upsert({ key: SPERR_KEY, wert: s, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    .upsert(
+      { key: SPERR_KEY, wert: { fehlversuche: 0, gesperrt_bis: null }, updated_at: new Date().toISOString() },
+      { onConflict: "key" },
+    );
+  if (error) throw new Error(`PIN-Sperre nicht zurückgesetzt: ${error.message}`);
 }
 
 export async function istFreigeschaltet(): Promise<boolean> {
@@ -84,30 +99,42 @@ export async function schalteFrei(pin: string): Promise<{ ok: boolean; meldung: 
   const soll = sollPin();
   if (!key || !soll) return { ok: false, meldung: "PIN nicht nutzbar." };
 
-  const sperre = await ladeSperre();
+  // Fail-closed: ohne lesbaren/schreibbaren Fehlversuchs-Zähler keine PIN-Prüfung
+  let sperre: PinSperre;
+  try {
+    sperre = await ladeSperre();
+  } catch {
+    return { ok: false, meldung: "PIN-Prüfung derzeit nicht möglich (Datenbank) – bitte später erneut versuchen." };
+  }
   if (sperre.gesperrt_bis && new Date(sperre.gesperrt_bis).getTime() > Date.now()) {
     return { ok: false, meldung: "Zu viele Fehlversuche – Freischaltung für 15 Minuten gesperrt." };
   }
 
   const hash = (s: string) => createHash("sha256").update(s).digest("hex");
   if (!gleich(hash(pin.trim()), hash(soll))) {
-    const fehlversuche = sperre.fehlversuche + 1;
-    const gesperrt = fehlversuche >= MAX_FEHLVERSUCHE;
-    await speichereSperre({
-      fehlversuche: gesperrt ? 0 : fehlversuche,
-      gesperrt_bis: gesperrt ? new Date(Date.now() + SPERRE_MS).toISOString() : null,
-    });
+    let stand: PinSperre;
+    try {
+      stand = await zaehleFehlversuch();
+    } catch {
+      return { ok: false, meldung: "PIN-Prüfung derzeit nicht möglich (Datenbank) – bitte später erneut versuchen." };
+    }
     // Raten bremsen
     await new Promise((r) => setTimeout(r, 1500));
     return {
       ok: false,
-      meldung: gesperrt
+      meldung: stand.gesperrt_bis
         ? "PIN falsch – zu viele Fehlversuche, 15 Minuten gesperrt."
-        : `PIN falsch (${fehlversuche} von ${MAX_FEHLVERSUCHE} Versuchen).`,
+        : `PIN falsch (${stand.fehlversuche} von ${MAX_FEHLVERSUCHE} Versuchen).`,
     };
   }
 
-  if (sperre.fehlversuche > 0 || sperre.gesperrt_bis) await speichereSperre({ fehlversuche: 0, gesperrt_bis: null });
+  if (sperre.fehlversuche > 0 || sperre.gesperrt_bis) {
+    try {
+      await setzeSperreZurueck();
+    } catch {
+      return { ok: false, meldung: "PIN-Prüfung derzeit nicht möglich (Datenbank) – bitte später erneut versuchen." };
+    }
+  }
   const ablauf = Math.floor(Date.now() / 1000) + GUELTIG_S;
   (await cookies()).set(COOKIE, `${ablauf}.${signiere(ablauf, key)}`, {
     httpOnly: true,

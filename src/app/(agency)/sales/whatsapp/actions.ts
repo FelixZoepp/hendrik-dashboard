@@ -47,8 +47,8 @@ export async function testnummernAktion(formData: FormData) {
     .split(/[\n,;]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const nummern = [...new Set(roh.map(normalisiereTelefon).filter((n): n is string => !!n))];
-  const ungueltig = roh.length - roh.map(normalisiereTelefon).filter(Boolean).length;
+  const nummern = [...new Set(roh.map((n) => normalisiereTelefon(n)).filter((n): n is string => !!n))];
+  const ungueltig = roh.length - roh.map((n) => normalisiereTelefon(n)).filter(Boolean).length;
   await speichereEinstellung(createAdminClient(), "testnummern", nummern);
   zurueck(`${nummern.length} Testnummer(n) gespeichert${ungueltig ? `, ${ungueltig} ungültige ignoriert` : ""}.`);
 }

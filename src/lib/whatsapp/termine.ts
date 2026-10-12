@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  folgeJobsNachStartaenderung,
   istGleicherTermin,
   planeZeitplan,
   zufallsToken,
@@ -55,9 +56,6 @@ export interface Termin {
 }
 
 export type TerminEingabe = TerminDaten;
-
-/** Jobs nach „gebucht“, die bei einer Startänderung umgerechnet werden. */
-const FOLGE_TYPEN: JobTyp[] = ["erinnerung", "unbestaetigt_check", "gleich"];
 
 export interface AnlegeErgebnis {
   termin: Termin;
@@ -128,7 +126,7 @@ async function fuehreZusammen(
   const termin = data as Termin;
 
   await planeJobs(svc, termin, jetzt);
-  if (z.startGeaendert) await rechneFolgeJobsUm(svc, termin, jetzt);
+  if (z.startGeaendert) await rechneFolgeJobsUm(svc, termin, jetzt, z.bestaetigungZuruecksetzen);
   if (z.optInGewonnen) await gebuchtWiederAktivieren(svc, termin, jetzt);
   return { termin, aktion: "zusammengefuehrt", startGeaendert: z.startGeaendert };
 }
@@ -213,20 +211,48 @@ export async function planeJobs(svc: SupabaseClient, termin: Termin, jetzt: Date
 }
 
 /**
- * Startänderung: noch geplante Folge-Jobs (Erinnerung, Nachfassen, gleich) auf den neuen
- * Start umrechnen bzw. abbrechen, wenn sie nicht mehr in den Plan passen. „gebucht“ bleibt.
+ * Startänderung: Folge-Jobs (Erinnerung, Nachfassen, gleich) auf den neuen Start umrechnen.
+ * Echte Verschiebung: unabhängig vom bisherigen Status (außer 'laeuft') neu planen — der
+ * Versand-Schlüssel enthält den Start, die Erinnerung darf also erneut kommen.
+ * Kleine Abweichung beim Zusammenführen: nur noch geplante umrechnen. „gebucht“ bleibt.
  */
-export async function rechneFolgeJobsUm(svc: SupabaseClient, termin: Termin, jetzt: Date): Promise<void> {
-  const plan = planeZeitplan(new Date(termin.start_at), jetzt, termin.art);
-  for (const typ of FOLGE_TYPEN) {
-    const neu = plan.find((p) => p.typ === typ);
-    const q = svc.from("wa_jobs").update(
-      neu
-        ? { run_at: neu.run_at.toISOString(), faellig_urspruenglich: neu.run_at.toISOString(), versuche: 0, ergebnis: "Termin verschoben" }
-        : { status: "abgebrochen", ergebnis: "Termin verschoben" },
-    );
-    const { error } = await q.eq("termin_id", termin.id).eq("typ", typ).eq("status", "geplant");
-    if (error) throw new Error(`Job ${typ} nicht umgerechnet: ${error.message}`);
+export async function rechneFolgeJobsUm(
+  svc: SupabaseClient,
+  termin: Termin,
+  jetzt: Date,
+  echteVerschiebung: boolean,
+): Promise<void> {
+  const { data, error } = await svc.from("wa_jobs").select("typ, status").eq("termin_id", termin.id);
+  if (error) throw new Error(`Jobs nicht lesbar: ${error.message}`);
+  const aktionen = folgeJobsNachStartaenderung(
+    (data ?? []) as Array<{ typ: JobTyp; status: string }>,
+    planeZeitplan(new Date(termin.start_at), jetzt, termin.art),
+    echteVerschiebung,
+  );
+  for (const a of aktionen) {
+    const { error: e } =
+      a.aktion === "planen"
+        ? await svc.from("wa_jobs").upsert(
+            {
+              termin_id: termin.id,
+              typ: a.typ,
+              run_at: a.run_at.toISOString(),
+              faellig_urspruenglich: a.run_at.toISOString(),
+              status: "geplant",
+              versuche: 0,
+              fehler: null,
+              ergebnis: "Termin verschoben",
+              claimed_at: null,
+            },
+            { onConflict: "termin_id,typ" },
+          )
+        : await svc
+            .from("wa_jobs")
+            .update({ status: "abgebrochen", ergebnis: "Termin verschoben" })
+            .eq("termin_id", termin.id)
+            .eq("typ", a.typ)
+            .eq("status", "geplant");
+    if (e) throw new Error(`Job ${a.typ} nicht umgerechnet: ${e.message}`);
   }
 }
 

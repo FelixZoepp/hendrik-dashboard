@@ -98,34 +98,42 @@ async function verarbeite(body: WaWebhook) {
         }
       }
 
+    }
+  }
+}
+
+/**
+ * Vorlagen-Kategorie und -Status synchron speichern (vor der Antwort):
+ * Supabase-Fehler → throw → 500, damit Meta erneut zustellt.
+ */
+async function speichereVorlagenEreignisse(body: WaWebhook) {
+  const svc = createAdminClient();
+  for (const entry of body.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      const value = change.value ?? {};
+
       if (change.field === "message_template_category_update" && value.message_template_name && value.new_category) {
-        try {
-          await svc
-            .from("wa_vorlagen")
-            .update({ kategorie: value.new_category.toUpperCase(), geprueft_am: new Date().toISOString() })
-            .eq("name", value.message_template_name);
-        } catch (err) {
-          await logFehler({ vorlage: value.message_template_name }, err instanceof Error ? err.message : String(err));
-        }
+        const { error } = await svc
+          .from("wa_vorlagen")
+          .update({ kategorie: value.new_category.toUpperCase(), geprueft_am: new Date().toISOString() })
+          .eq("name", value.message_template_name);
+        if (error) throw new Error(`Vorlagen-Kategorie nicht gespeichert: ${error.message}`);
       }
 
       if (change.field === "message_template_status_update" && value.message_template_name) {
-        try {
-          const status = vorlagenStatus(value.event ?? "");
-          await svc.from("wa_vorlagen").upsert(
-            {
-              name: value.message_template_name,
-              sprache: value.message_template_language ?? "de",
-              status,
-              meta_id: value.message_template_id != null ? String(value.message_template_id) : null,
-              ablehnungsgrund: status === "REJECTED" && value.reason && value.reason !== "NONE" ? value.reason : null,
-              geprueft_am: new Date().toISOString(),
-            },
-            { onConflict: "name" },
-          );
-        } catch (err) {
-          await logFehler({ vorlage: value.message_template_name }, err instanceof Error ? err.message : String(err));
-        }
+        const status = vorlagenStatus(value.event ?? "");
+        const { error } = await svc.from("wa_vorlagen").upsert(
+          {
+            name: value.message_template_name,
+            sprache: value.message_template_language ?? "de",
+            status,
+            meta_id: value.message_template_id != null ? String(value.message_template_id) : null,
+            ablehnungsgrund: status === "REJECTED" && value.reason && value.reason !== "NONE" ? value.reason : null,
+            geprueft_am: new Date().toISOString(),
+          },
+          { onConflict: "name" },
+        );
+        if (error) throw new Error(`Vorlagen-Status nicht gespeichert: ${error.message}`);
       }
     }
   }
@@ -151,8 +159,9 @@ export async function POST(request: NextRequest) {
   try {
     const svc = createAdminClient();
     for (const m of nachrichten) await speichereEingang(svc, m);
+    await speichereVorlagenEreignisse(daten);
   } catch (err) {
-    console.error("[whatsapp] Eingang nicht gespeichert:", err);
+    console.error("[whatsapp] Webhook nicht gespeichert:", err);
     return NextResponse.json({ error: "Speichern fehlgeschlagen" }, { status: 500 });
   }
 
@@ -160,8 +169,11 @@ export async function POST(request: NextRequest) {
   after(async () => {
     try {
       const svc = createAdminClient();
-      await verarbeiteOffeneEingaenge(svc, { waMessageIds: nachrichten.map((m) => m.id), budgetMs: 40_000 });
       await verarbeite(daten);
+      await verarbeiteOffeneEingaenge(svc, {
+        waMessageIds: nachrichten.map((m) => m.id),
+        deadline: Date.now() + 45_000,
+      });
     } catch (err) {
       await createAdminClient()
         .from("webhook_errors")

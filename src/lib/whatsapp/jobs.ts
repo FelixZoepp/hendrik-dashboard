@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aufgabeAnLead } from "./close-log";
-import { sendeVorlage, VersandUnklar } from "./gate";
+import { OhneWiederholung, sendeVorlage, VersandUnklar } from "./gate";
 import {
   anredeName,
   berlinDatum,
@@ -10,6 +10,7 @@ import {
   gleichNochPassend,
   MAX_VERSPAETUNG_MS,
   metaParameter,
+  MIN_REST_MS,
   sendeFrist,
   type JobTyp,
 } from "./logik";
@@ -157,10 +158,10 @@ async function schreibeAusgang(svc: SupabaseClient, job: Job, ausgang: JobAusgan
 /** Fällige Jobs abarbeiten, bis keine mehr da sind oder das Zeitbudget aufgebraucht ist. */
 export async function verarbeiteJobs(
   svc: SupabaseClient,
-  opts: { budgetMs?: number } = {},
+  opts: { deadline: number },
 ): Promise<{ verarbeitet: number; zurueckgelegt: number; ergebnisse: Record<string, number> }> {
-  // Puffer: ein Job darf noch bis zu ~15 s brauchen (Meta- und Close-Zeitlimits je 10 s)
-  const ende = Date.now() + (opts.budgetMs ?? 45_000) - 15_000;
+  // Vor jedem Job müssen ≥ 15 s bleiben (Meta- und Close-Zeitlimits je 10 s)
+  const ende = opts.deadline - MIN_REST_MS;
   const ergebnisse: Record<string, number> = {};
   let verarbeitet = 0;
   let zurueckgelegt = 0;
@@ -192,7 +193,9 @@ export async function verarbeiteJobs(
         ausgang =
           err instanceof VersandUnklar
             ? { status: "fehler", fehler: `${fehler} — bitte in WhatsApp prüfen, ob die Nachricht ankam` }
-            : job.versuche < MAX_VERSUCHE
+            : err instanceof OhneWiederholung
+              ? { status: "fehler", fehler }
+              : job.versuche < MAX_VERSUCHE
               ? // Kurz erneut versuchen — die feste Deadline (15 Min.) begrenzt Wiederholungen
                 { status: "geplant", run_at: new Date(jetzt.getTime() + 2 * 60_000), ergebnis: `Fehler: ${fehler}` }
               : { status: "fehler", fehler };

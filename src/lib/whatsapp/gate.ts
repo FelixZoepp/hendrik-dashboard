@@ -3,6 +3,26 @@ import { MetaFehler, sendeTextRoh, sendeVideoRoh, sendeVorlageRoh, waVerbindung 
 import { notizSicher } from "./close-log";
 import { ladeEinstellungen, type WaEinstellungen } from "./einstellungen";
 import { normalisiereTelefon, ruhezeitEntscheidung, versandSchluessel, waNummer, type JobTyp } from "./logik";
+
+/**
+ * Versand reservieren. Gibt die Zeilen-ID zurück oder null, wenn schon gesendet/in Arbeit.
+ * Eine Reservierung mit Status 'fehlgeschlagen' (Meta hat sicher abgelehnt) gilt NICHT als
+ * gesendet und wird übernommen (Update statt Insert, nur solange sie 'fehlgeschlagen' ist).
+ */
+async function reserviere(svc: SupabaseClient, zeile: Record<string, unknown> & { versand_schluessel: string }) {
+  const { data, error } = await svc.from("wa_nachrichten").insert({ ...zeile, status: "reserviert" }).select("id").single();
+  if (!error && data) return (data as { id: string }).id;
+  if (error?.code !== "23505") throw new Error(`Versand nicht reserviert: ${error?.message}`);
+
+  const { data: uebernommen, error: uFehler } = await svc
+    .from("wa_nachrichten")
+    .update({ ...zeile, status: "reserviert", fehler: null, wa_message_id: null })
+    .eq("versand_schluessel", zeile.versand_schluessel)
+    .eq("status", "fehlgeschlagen")
+    .select("id");
+  if (uFehler) throw new Error(`Versand nicht reserviert: ${uFehler.message}`);
+  return ((uebernommen ?? []) as Array<{ id: string }>)[0]?.id ?? null;
+}
 import { renderBody, type VorlageDef } from "./vorlagen";
 import type { Termin } from "./termine";
 
@@ -23,8 +43,18 @@ import type { Termin } from "./termine";
  * Vorlagen werden vor dem Versand reserviert (versand_schluessel, unique) → nie doppelt.
  */
 
-/** Versand-Ergebnis unklar (Timeout/Netz/5xx) — Reservierung bleibt, kein automatischer Neuversand. */
-export class VersandUnklar extends Error {
+/**
+ * Fehler, nach dem der Job NICHT automatisch wiederholt werden darf (Job → 'fehler').
+ * VersandUnklar: Timeout/Netz/5xx — Nachricht evtl. doch angekommen, Reservierung bleibt.
+ */
+export class OhneWiederholung extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OhneWiederholung";
+  }
+}
+
+export class VersandUnklar extends OhneWiederholung {
   constructor(message: string) {
     super(message);
     this.name = "VersandUnklar";
@@ -238,26 +268,19 @@ export async function sendeVorlage(
   });
   const body = renderBody(o.vorlage, o.werte);
 
-  // Reservierung
-  const { data: reserviert, error: rFehler } = await svc
-    .from("wa_nachrichten")
-    .insert({
-      richtung: "aus",
-      telefon,
-      termin_id: o.termin.id,
-      close_lead_id: o.termin.close_lead_id,
-      typ: "template",
-      vorlage: o.vorlage.name,
-      body,
-      versand_schluessel: versandSchluessel(telefon, o.vorlage.name, o.typ, o.termin.art, new Date(o.termin.start_at)),
-      status: "reserviert",
-      payload: { components },
-    })
-    .select("id")
-    .single();
-  if (rFehler?.code === "23505") return { gesendet: false, grund: "bereits gesendet" };
-  if (rFehler || !reserviert) throw new Error(`Versand nicht reserviert: ${rFehler?.message}`);
-  const zeileId = (reserviert as { id: string }).id;
+  // Reservierung (je Termin + Typ + Start genau einmal)
+  const zeileId = await reserviere(svc, {
+    richtung: "aus",
+    telefon,
+    termin_id: o.termin.id,
+    close_lead_id: o.termin.close_lead_id,
+    typ: "template",
+    vorlage: o.vorlage.name,
+    body,
+    versand_schluessel: versandSchluessel(o.termin.id, o.typ, new Date(o.termin.start_at)),
+    payload: { components },
+  });
+  if (!zeileId) return { gesendet: false, grund: "bereits gesendet" };
 
   let waMessageId: string;
   try {
@@ -265,10 +288,15 @@ export async function sendeVorlage(
   } catch (err) {
     const fehler = (err instanceof Error ? err.message : String(err)).slice(0, 500);
     if (err instanceof MetaFehler && err.eindeutig) {
-      await svc
+      // Sicher nicht gesendet → als 'fehlgeschlagen' markieren (Schlüssel bleibt, darf übernommen werden)
+      const { error: fFehler } = await svc
         .from("wa_nachrichten")
-        .update({ status: "fehlgeschlagen", fehler, versand_schluessel: null })
-        .eq("id", zeileId);
+        .update({ status: "fehlgeschlagen", fehler })
+        .eq("id", zeileId)
+        .eq("status", "reserviert");
+      if (fFehler) {
+        throw new OhneWiederholung(`Reservierung nicht freigegeben, bitte prüfen (${fFehler.message}) — Meta: ${fehler}`);
+      }
       throw err;
     }
     await svc.from("wa_nachrichten").update({ fehler: `Ergebnis unklar: ${fehler}` }).eq("id", zeileId);

@@ -11,6 +11,7 @@ import {
   erinnerungsTag,
   erkenneAntwort,
   formatDatum,
+  folgeJobsNachStartaenderung,
   formatUhrzeit,
   gleichNochPassend,
   hatUhrzeit,
@@ -153,6 +154,19 @@ test("normalisiereTelefon", () => {
   assert.equal(normalisiereTelefon("12"), null);
   assert.equal(normalisiereTelefon(""), null);
   assert.equal(normalisiereTelefon(null), null);
+});
+test("Meta-Absender (wa_id) international ohne Deutschland-Heuristik", () => {
+  assert.equal(normalisiereTelefon("436641234567", "whatsapp"), "+436641234567");
+  assert.equal(normalisiereTelefon("41791234567", "whatsapp"), "+41791234567");
+  assert.equal(normalisiereTelefon("4915123456789", "whatsapp"), "+4915123456789");
+  assert.equal(normalisiereTelefon("15551234567", "whatsapp"), "+15551234567", "US-Nummer bleibt US");
+  // dieselbe Ziffernfolge als Benutzereingabe wäre eine deutsche Mobilnummer
+  assert.equal(normalisiereTelefon("15551234567"), "+4915551234567");
+  assert.equal(normalisiereTelefon("0151234567", "whatsapp"), null);
+});
+test("STOP aus dem Ausland: Nummer korrekt + Abmeldung erkannt", () => {
+  assert.equal(normalisiereTelefon("41791234567", "whatsapp"), "+41791234567");
+  assert.equal(erkenneAntwort("STOP"), "stop");
 });
 
 console.log("Antwort-Erkennung");
@@ -297,6 +311,33 @@ test("Gleiche Quelle, gleiche Nummer: Einwilligung zurückgenommen wird übernom
   const z = zusammenfuehren({ ...close, opt_in: true }, { ...close, opt_in: false }, true);
   assert.equal(z.patch.opt_in, false);
 });
+test("Calendly-Termin: Treffer über Close-Protokoll überschreibt Start/Kontakt/opt_in nicht", () => {
+  const bestehend = { ...calendly, close_protokoll_id: "acti_1", opt_in: true };
+  const z = zusammenfuehren(
+    bestehend,
+    {
+      ...close,
+      close_protokoll_id: "acti_1",
+      start_at: B(2026, 10, 15, 11).toISOString(),
+      telefon: "+4917000000000",
+      email: "anders@example.de",
+      name: "Anderer Name",
+      opt_in: false,
+    },
+    true,
+  );
+  assert.equal(z.patch.start_at, undefined);
+  assert.equal(z.patch.telefon, undefined);
+  assert.equal(z.patch.email, undefined);
+  assert.equal(z.patch.name, undefined);
+  assert.equal(z.patch.opt_in, undefined, "true bleibt");
+  assert.equal(z.patch.close_lead_id, "lead_1", "Lücken werden gefüllt");
+  assert.equal(z.startGeaendert, false);
+});
+test("Calendly-Termin, gleiche Nummer: Close nimmt Einwilligung nicht weg", () => {
+  const z = zusammenfuehren({ ...calendly, opt_in: true }, { ...close, opt_in: false }, true);
+  assert.equal(z.patch.opt_in, undefined);
+});
 test("identische Daten → leerer Patch", () => {
   const z = zusammenfuehren(calendly, { ...calendly });
   assert.deepEqual(z.patch, {});
@@ -304,21 +345,60 @@ test("identische Daten → leerer Patch", () => {
 });
 
 console.log("Versand-Regeln");
-test("versandSchluessel: gebucht je Nummer/Art/Tag, sonst Vorlage + Start", () => {
+test("versandSchluessel: gebucht einmal je Termin, sonst Termin + Typ + Start", () => {
   const start = B(2026, 10, 15, 10);
-  assert.equal(
-    versandSchluessel("+4915123456789", "hs_erstgespraech_gebucht", "gebucht", "erstgespraech", start),
-    "+4915123456789|erstgespraech|gebucht|2026-10-15",
+  assert.equal(versandSchluessel("t1", "gebucht", start), "t1|gebucht");
+  assert.equal(versandSchluessel("t1", "gebucht", B(2026, 10, 16, 9)), "t1|gebucht", "Verschiebung → kein neues „gebucht“");
+  assert.equal(versandSchluessel("t1", "erinnerung", start), "t1|erinnerung|2026-10-15T08:00:00.000Z");
+});
+test("Zwei Erstgespräche am selben Tag (10 und 16 Uhr) bekommen beide eine Bestätigung", () => {
+  const jetzt = B(2026, 10, 14, 9);
+  const a = planeZeitplan(B(2026, 10, 15, 10), jetzt, "erstgespraech");
+  const b = planeZeitplan(B(2026, 10, 15, 16), jetzt, "erstgespraech");
+  assert.ok(typen(a).includes("gebucht") && typen(b).includes("gebucht"));
+  assert.notEqual(versandSchluessel("termin_a", "gebucht", B(2026, 10, 15, 10)), versandSchluessel("termin_b", "gebucht", B(2026, 10, 15, 16)));
+});
+test("Verschiebung erzeugt neue Erinnerung (neuer Schlüssel, Job wieder geplant)", () => {
+  const alt = B(2026, 10, 15, 10);
+  const neu = B(2026, 10, 16, 14);
+  assert.notEqual(versandSchluessel("t1", "erinnerung", alt), versandSchluessel("t1", "erinnerung", neu));
+  const plan = planeZeitplan(neu, B(2026, 10, 14, 12), "strategie");
+  const aktionen = folgeJobsNachStartaenderung(
+    [
+      { typ: "erinnerung", status: "erledigt" },
+      { typ: "unbestaetigt_check", status: "uebersprungen" },
+      { typ: "gleich", status: "laeuft" },
+    ],
+    plan,
+    true,
   );
-  assert.equal(
-    versandSchluessel("+4915123456789", "hs_erstgespraech_gebucht", "gebucht", "erstgespraech", B(2026, 10, 15, 10, 20)),
-    "+4915123456789|erstgespraech|gebucht|2026-10-15",
-    "leicht abweichender Start → derselbe Schlüssel",
+  assert.deepEqual(aktionen.map((a) => `${a.typ}:${a.aktion}`), ["erinnerung:planen", "unbestaetigt_check:planen"]);
+  assert.equal(aktionen[0].run_at.toISOString(), B(2026, 10, 15, 14).toISOString());
+});
+test("Kleine Abweichung beim Zusammenführen: nur noch geplante Jobs umrechnen", () => {
+  const plan = planeZeitplan(B(2026, 10, 15, 10, 10), B(2026, 10, 14, 12), "strategie");
+  const aktionen = folgeJobsNachStartaenderung(
+    [
+      { typ: "erinnerung", status: "erledigt" },
+      { typ: "unbestaetigt_check", status: "geplant" },
+      { typ: "gleich", status: "geplant" },
+    ],
+    plan,
+    false,
   );
-  assert.equal(
-    versandSchluessel("+4915123456789", "hs_strategie_erinnerung", "erinnerung", "strategie", start),
-    "+4915123456789|hs_strategie_erinnerung|2026-10-15T08:00",
+  assert.deepEqual(aktionen.map((a) => `${a.typ}:${a.aktion}`), ["unbestaetigt_check:planen", "gleich:planen"]);
+});
+test("Job passt nicht mehr in den Plan → abbrechen (nur wenn geplant)", () => {
+  const plan = planeZeitplan(B(2026, 10, 14, 13), B(2026, 10, 14, 12, 30), "strategie"); // nur „gebucht“
+  const aktionen = folgeJobsNachStartaenderung(
+    [
+      { typ: "erinnerung", status: "geplant" },
+      { typ: "gleich", status: "erledigt" },
+    ],
+    plan,
+    true,
   );
+  assert.deepEqual(aktionen.map((a) => `${a.typ}:${a.aktion}`), ["erinnerung:abbrechen"]);
 });
 test("gleichNochPassend: ±5 Min. um Start − Vorlauf", () => {
   const start = B(2026, 10, 15, 10);

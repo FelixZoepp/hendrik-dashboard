@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { verarbeiteEingang } from "./antworten";
+import { MIN_REST_MS } from "./logik";
 
 /**
  * Eingang von Meta: Rohereignisse werden VOR der 200-Antwort in wa_eingang gespeichert,
@@ -21,7 +22,6 @@ export interface WaNachricht {
   reaction?: { message_id?: string; emoji?: string };
 }
 
-const MAX_VERSUCHE = 5;
 
 export function nachrichtText(m: WaNachricht): string {
   if (m.type === "reaction") return `Reaktion ${m.reaction?.emoji ?? ""}`.trim();
@@ -46,10 +46,22 @@ interface EingangZeile {
   payload: WaNachricht;
   status: string;
   versuche: number;
+  claimed_at: string;
+}
+
+
+/** Ergebnis nur für den eigenen Claim schreiben (status 'in_arbeit' + claimed_at). */
+async function schreibe(svc: SupabaseClient, z: EingangZeile, update: Record<string, unknown>) {
+  const { error } = await svc
+    .from("wa_eingang")
+    .update({ ...update, updated_at: new Date().toISOString() })
+    .eq("id", z.id)
+    .eq("status", "in_arbeit")
+    .eq("claimed_at", z.claimed_at);
+  if (error) throw new Error(`Eingang ${z.wa_message_id} nicht aktualisiert: ${error.message}`);
 }
 
 async function verarbeiteZeile(svc: SupabaseClient, z: EingangZeile): Promise<boolean> {
-  if (z.status === "verarbeitet") return true;
   const m = z.payload;
   try {
     await verarbeiteEingang(svc, {
@@ -61,49 +73,51 @@ async function verarbeiteZeile(svc: SupabaseClient, z: EingangZeile): Promise<bo
       zeit: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
       payload: m,
     });
-    await svc
-      .from("wa_eingang")
-      .update({ status: "verarbeitet", versuche: z.versuche + 1, fehler: null, updated_at: new Date().toISOString() })
-      .eq("id", z.id);
+    await schreibe(svc, z, { status: "verarbeitet", fehler: null });
     return true;
   } catch (err) {
     const fehler = err instanceof Error ? err.message : String(err);
-    await svc
-      .from("wa_eingang")
-      .update({ status: "fehler", versuche: z.versuche + 1, fehler: fehler.slice(0, 1000), updated_at: new Date().toISOString() })
-      .eq("id", z.id);
+    await schreibe(svc, z, { status: "fehler", fehler: fehler.slice(0, 1000) });
     await svc.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { wa_message_id: z.wa_message_id }, error: fehler });
     return false;
   }
 }
 
 /**
- * Offene Eingänge verarbeiten. Mit ids: genau diese (direkt nach dem Webhook).
- * Ohne ids (Cron): 'neu' älter als 2 Min. (der Webhook ist dann sicher fertig) und 'fehler' < 5 Versuche.
+ * Offene Eingänge atomar übernehmen (wa_eingang_claim, SKIP LOCKED) und verarbeiten.
+ * Mit waMessageIds: genau diese (direkt nach dem Webhook). Ohne (Cron): 'neu' älter als
+ * 2 Min. und 'fehler' mit < 5 Versuchen. Vor jedem Eintrag müssen ≥ 15 s bis zur Deadline
+ * bleiben; übernommene, nicht bearbeitete Einträge gehen zurück.
  */
 export async function verarbeiteOffeneEingaenge(
   svc: SupabaseClient,
-  opts: { waMessageIds?: string[]; budgetMs?: number } = {},
-): Promise<{ verarbeitet: number; fehler: number }> {
-  const ende = Date.now() + (opts.budgetMs ?? 20_000);
-  let q = svc.from("wa_eingang").select("id, wa_message_id, payload, status, versuche").order("created_at").limit(50);
-  if (opts.waMessageIds) {
-    if (opts.waMessageIds.length === 0) return { verarbeitet: 0, fehler: 0 };
-    q = q.in("wa_message_id", opts.waMessageIds).neq("status", "verarbeitet");
-  } else {
-    const grenze = new Date(Date.now() - 2 * 60_000).toISOString();
-    q = q
-      .lt("versuche", MAX_VERSUCHE)
-      .or(`and(status.eq.neu,created_at.lt.${grenze}),and(status.eq.fehler,updated_at.lt.${grenze})`);
+  opts: { waMessageIds?: string[]; deadline: number },
+): Promise<{ verarbeitet: number; fehler: number; zurueckgelegt: number }> {
+  const ergebnis = { verarbeitet: 0, fehler: 0, zurueckgelegt: 0 };
+  if (opts.waMessageIds && opts.waMessageIds.length === 0) return ergebnis;
+
+  while (opts.deadline - Date.now() >= MIN_REST_MS) {
+    const { data, error } = await svc.rpc("wa_eingang_claim", { p_ids: opts.waMessageIds ?? null, p_limit: 5 });
+    if (error) throw new Error(`Eingang nicht abrufbar: ${error.message}`);
+    const zeilen = (data ?? []) as EingangZeile[];
+    if (zeilen.length === 0) break;
+
+    for (const z of zeilen) {
+      if (opts.deadline - Date.now() < MIN_REST_MS) {
+        // Zeit reicht nicht → unbearbeitet zurückgeben (Versuch nicht zählen)
+        await schreibe(svc, z, {
+          status: z.versuche > 1 ? "fehler" : "neu",
+          versuche: Math.max(0, z.versuche - 1),
+          claimed_at: null,
+        });
+        ergebnis.zurueckgelegt++;
+        continue;
+      }
+      if (await verarbeiteZeile(svc, z)) ergebnis.verarbeitet++;
+      else ergebnis.fehler++;
+    }
+    // Mit festen IDs gibt es nach einem Durchlauf nichts mehr zu holen
+    if (opts.waMessageIds) break;
   }
-  const { data, error } = await q;
-  if (error) throw new Error(`Eingang nicht lesbar: ${error.message}`);
-  let verarbeitet = 0;
-  let fehler = 0;
-  for (const z of (data ?? []) as EingangZeile[]) {
-    if (Date.now() > ende) break;
-    if (await verarbeiteZeile(svc, z)) verarbeitet++;
-    else fehler++;
-  }
-  return { verarbeitet, fehler };
+  return ergebnis;
 }
