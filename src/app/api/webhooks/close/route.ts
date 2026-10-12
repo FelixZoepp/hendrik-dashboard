@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 import { closeApi } from "@/lib/integrations/close";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verarbeiteCloseProtokoll } from "@/lib/whatsapp/quellen";
 
 // Close-Webhook: Gesprächsprotokolle (Cold Call, Setting, Closing) steuern
 // automatisch die Pipeline "Setter-Closer Hoffmann Solutions" und den Lead-Status.
@@ -294,6 +295,41 @@ async function fuehreAus(protokoll: Protokoll, aktion: Aktion) {
   return ergebnis;
 }
 
+/**
+ * WhatsApp-Terminbot: Termin aus dem Protokoll anlegen bzw. No-Show/Stattgefunden setzen.
+ * Läuft zusätzlich NACH der Pipeline-Logik und darf den Close-Webhook nie scheitern lassen.
+ */
+async function whatsappTerminbot(
+  supabase: ReturnType<typeof createAdminClient>,
+  protokoll: Protokoll,
+) {
+  try {
+    const typ = (Object.keys(PROTOKOLL) as Array<keyof typeof PROTOKOLL>).find(
+      (k) => PROTOKOLL[k] === protokoll.custom_activity_type_id,
+    );
+    const wert = (REGELN[protokoll.custom_activity_type_id] ?? [])
+      .map(({ feld, werte }) => {
+        const w = protokoll[feld] as string | undefined;
+        return w && werte[w] ? w : undefined;
+      })
+      .find((w): w is string => !!w);
+    if (!typ || !wert) return;
+    await verarbeiteCloseProtokoll(supabase, {
+      protokoll,
+      typ,
+      wert,
+      kalender: (protokoll[FIELD.kalender] as string | undefined) || null,
+      gelegtAuf: (protokoll[FIELD.gelegtAuf] as string | undefined) || null,
+    });
+  } catch (err) {
+    await supabase.from("webhook_errors").insert({
+      endpoint: "whatsapp",
+      payload: { quelle: "close", lead_id: protokoll.lead_id, activity_id: protokoll.id },
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function POST(request: Request) {
   const body = await request.text();
   const supabase = createAdminClient();
@@ -333,6 +369,7 @@ export async function POST(request: Request) {
     }
 
     const ergebnis = await fuehreAus(protokoll, aktion);
+    await whatsappTerminbot(supabase, protokoll);
     if (ergebnis.warnung) {
       await logFehler({ lead_id: protokoll.lead_id, activity_id: activityId }, String(ergebnis.warnung));
     }
