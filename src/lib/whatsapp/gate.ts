@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { sendeTextRoh, sendeVideoRoh, sendeVorlageRoh, waVerbindung } from "./client";
+import { MetaFehler, sendeTextRoh, sendeVideoRoh, sendeVorlageRoh, waVerbindung } from "./client";
 import { notizSicher } from "./close-log";
 import { ladeEinstellungen, type WaEinstellungen } from "./einstellungen";
-import { normalisiereTelefon, ruhezeitEntscheidung, waNummer } from "./logik";
+import { normalisiereTelefon, ruhezeitEntscheidung, versandSchluessel, waNummer, type JobTyp } from "./logik";
 import { renderBody, type VorlageDef } from "./vorlagen";
 import type { Termin } from "./termine";
 
@@ -12,13 +12,24 @@ import type { Termin } from "./termine";
  * Reihenfolge:
  * 1. Umgebungsvariablen vollständig („verbunden“)
  * 2. bot_aktiv ODER Nummer steht in testnummern
- * 3. Vorlage: in vorlagen_aktiv eingeschaltet UND bei Meta APPROVED
+ * 3. Vorlage: in vorlagen_aktiv eingeschaltet UND bei Meta APPROVED UND Kategorie UTILITY
  * 4. Vorlage zu einem Termin: opt_in des Termins
  * 5. keine Abmeldung (opt_out) — außer der Pflicht-Bestätigung einer Abmeldung
  * 6. Freitext/Video nur im offenen 24-h-Fenster
  * 7. Ruhezeit 21–8 Uhr (nur geplante Nachrichten): auf 8:00 verschieben, außer das läge
  *    nach Terminbeginn → überspringen
+ *
+ * Fail-closed: Kann eine Prüfung nicht gelesen werden (DB-Fehler), wird nicht gesendet.
+ * Vorlagen werden vor dem Versand reserviert (versand_schluessel, unique) → nie doppelt.
  */
+
+/** Versand-Ergebnis unklar (Timeout/Netz/5xx) — Reservierung bleibt, kein automatischer Neuversand. */
+export class VersandUnklar extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "VersandUnklar";
+  }
+}
 
 export type Pruefung = { ok: true } | { ok: false; grund: string; verschiebenAuf?: Date };
 
@@ -51,7 +62,12 @@ export async function pruefeVersand(svc: SupabaseClient, o: PruefOpts): Promise<
     return { ok: false, grund: `WhatsApp nicht verbunden (fehlt: ${verbindung.fehlend.join(", ")})` };
   }
 
-  const e = o.einstellungen ?? (await ladeEinstellungen(svc));
+  let e: WaEinstellungen;
+  try {
+    e = o.einstellungen ?? (await ladeEinstellungen(svc));
+  } catch (err) {
+    return { ok: false, grund: `Einstellungen nicht lesbar: ${err instanceof Error ? err.message : String(err)}` };
+  }
   if (!e.bot_aktiv && !istTestnummer(e, o.telefon)) {
     return { ok: false, grund: "Bot ist aus und Nummer ist keine Testnummer" };
   }
@@ -60,21 +76,36 @@ export async function pruefeVersand(svc: SupabaseClient, o: PruefOpts): Promise<
     if (e.vorlagen_aktiv[o.vorlage.name] !== true) {
       return { ok: false, grund: `Vorlage ${o.vorlage.name} ist ausgeschaltet` };
     }
-    const { data: v } = await svc.from("wa_vorlagen").select("status").eq("name", o.vorlage.name).maybeSingle();
+    const { data: v, error: vFehler } = await svc
+      .from("wa_vorlagen")
+      .select("status, kategorie")
+      .eq("name", o.vorlage.name)
+      .maybeSingle();
+    if (vFehler) return { ok: false, grund: `Vorlagen-Status nicht lesbar: ${vFehler.message}` };
     const status = (v as { status?: string | null } | null)?.status ?? null;
+    const kategorie = (v as { kategorie?: string | null } | null)?.kategorie ?? null;
     if (status !== "APPROVED") {
       return { ok: false, grund: `Vorlage ${o.vorlage.name} ist bei Meta nicht freigegeben (${status ?? "nicht eingereicht"})` };
+    }
+    if (kategorie?.toUpperCase() !== "UTILITY") {
+      return {
+        ok: false,
+        grund: kategorie
+          ? `Vorlage ${o.vorlage.name} wurde von Meta auf ${kategorie} umgestuft`
+          : `Kategorie von ${o.vorlage.name} unbekannt — bitte Status abgleichen`,
+      };
     }
     if (o.termin && !o.termin.opt_in) {
       return { ok: false, grund: "Keine WhatsApp-Einwilligung für diesen Termin" };
     }
   }
 
-  const { data: k } = await svc
+  const { data: k, error: kFehler } = await svc
     .from("wa_kontakte")
     .select("opt_out, fenster_bis")
     .eq("telefon", o.telefon)
     .maybeSingle();
+  if (kFehler) return { ok: false, grund: `Kontakt nicht lesbar: ${kFehler.message}` };
   const kontakt = k as { opt_out: boolean; fenster_bis: string | null } | null;
   if (kontakt?.opt_out && !o.pflichtAntwort) {
     return { ok: false, grund: "Kontakt hat sich abgemeldet (STOP)" };
@@ -156,11 +187,18 @@ async function sendeUndProtokolliere(
 // Senden
 // ---------------------------------------------------------------------------
 
-/** Vorlage zu einem Termin senden (Werte = {{1}}, {{2}} …; Knöpfe bekommen Token bzw. Payload). */
+/**
+ * Vorlage zu einem Termin senden (Werte = {{1}}, {{2}} …; Knöpfe bekommen Token bzw. Payload).
+ * Ablauf: Prüfung → Reservierung (unique versand_schluessel) → Meta → Ergebnis.
+ * - 23505 bei der Reservierung: schon gesendet/in Arbeit → nicht senden
+ * - Meta antwortet 4xx (sicher nicht gesendet): Reservierung freigeben, Fehler werfen
+ * - Timeout/Netz/5xx (unklar): Reservierung bleibt, VersandUnklar werfen → kein Neuversand
+ */
 export async function sendeVorlage(
   svc: SupabaseClient,
   o: {
     termin: Termin;
+    typ: JobTyp;
     vorlage: VorlageDef;
     werte: string[];
     ruhezeit: { spaetestens: Date | null } | false;
@@ -198,20 +236,52 @@ export async function sendeVorlage(
           },
     );
   });
+  const body = renderBody(o.vorlage, o.werte);
 
-  return sendeUndProtokolliere(
-    svc,
-    {
+  // Reservierung
+  const { data: reserviert, error: rFehler } = await svc
+    .from("wa_nachrichten")
+    .insert({
+      richtung: "aus",
       telefon,
       termin_id: o.termin.id,
       close_lead_id: o.termin.close_lead_id,
       typ: "template",
       vorlage: o.vorlage.name,
-      body: renderBody(o.vorlage, o.werte),
+      body,
+      versand_schluessel: versandSchluessel(telefon, o.vorlage.name, o.typ, o.termin.art, new Date(o.termin.start_at)),
+      status: "reserviert",
       payload: { components },
-    },
-    () => sendeVorlageRoh(waNummer(telefon), o.vorlage.name, o.vorlage.sprache, components),
-  );
+    })
+    .select("id")
+    .single();
+  if (rFehler?.code === "23505") return { gesendet: false, grund: "bereits gesendet" };
+  if (rFehler || !reserviert) throw new Error(`Versand nicht reserviert: ${rFehler?.message}`);
+  const zeileId = (reserviert as { id: string }).id;
+
+  let waMessageId: string;
+  try {
+    waMessageId = await sendeVorlageRoh(waNummer(telefon), o.vorlage.name, o.vorlage.sprache, components);
+  } catch (err) {
+    const fehler = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    if (err instanceof MetaFehler && err.eindeutig) {
+      await svc
+        .from("wa_nachrichten")
+        .update({ status: "fehlgeschlagen", fehler, versand_schluessel: null })
+        .eq("id", zeileId);
+      throw err;
+    }
+    await svc.from("wa_nachrichten").update({ fehler: `Ergebnis unklar: ${fehler}` }).eq("id", zeileId);
+    throw new VersandUnklar(`Ergebnis unklar (kein automatischer Neuversand): ${fehler}`);
+  }
+
+  const { error: uFehler } = await svc
+    .from("wa_nachrichten")
+    .update({ status: "gesendet", wa_message_id: waMessageId })
+    .eq("id", zeileId);
+  if (uFehler) console.error("[whatsapp] Versand nicht protokolliert:", uFehler.message);
+  await notizSicher(o.termin.close_lead_id, `WhatsApp gesendet: ${o.vorlage.name}\n\n${body}`);
+  return { gesendet: true, waMessageId };
 }
 
 /** Freitext — nur im offenen 24-h-Fenster (Antwort auf eine Nachricht des Kontakts). */

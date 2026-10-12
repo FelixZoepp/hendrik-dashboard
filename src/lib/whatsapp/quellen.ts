@@ -1,13 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { closeBenutzerName, closeBenutzerPerEmail, feldWert, findeCloseLead, istJa, ladeLead } from "./close-log";
-import { ladeEinstellungen } from "./einstellungen";
-import { artAusCalendly, normalisiereTelefon, vornameAus, type TerminArt } from "./logik";
 import {
+  closeBenutzerName,
+  closeBenutzerPerEmail,
+  feldWert,
+  findeCloseLead,
+  istJa,
+  ladeLead,
+  notizSicher,
+} from "./close-log";
+import { ladeEinstellungen } from "./einstellungen";
+import { artAusCalendly, hatUhrzeit, normalisiereTelefon, vornameAus, type TerminArt } from "./logik";
+import {
+  legeAbsagePlatzhalterAn,
   legeTerminAn,
   letzterTerminDesLeads,
   markiereStattgefunden,
   markiereVerpasst,
   sagTerminAb,
+  terminZumErgebnisProtokoll,
   type Termin,
   type TerminEingabe,
 } from "./termine";
@@ -50,9 +60,18 @@ export interface CalendlyWebhook {
 }
 
 const TELEFON_FRAGE = /whatsapp|handy|telefon|mobil/i;
+/** Nur eine Nummer aus der WhatsApp-Frage gilt als Einwilligung („Handynummer für die Terminbestätigung per WhatsApp“). */
+const WHATSAPP_FRAGE = /whatsapp/i;
 
-/** Telefonnummer aus SMS-Erinnerungsfeld, Telefon-Frage oder „Wir rufen an“-Ort. */
-export function telefonAusCalendly(p: NonNullable<CalendlyWebhook["payload"]>): string | null {
+/**
+ * Telefonnummer und Einwilligung aus einer Calendly-Buchung.
+ * opt_in nur, wenn die Nummer aus einer Frage mit „WhatsApp“ im Text stammt. SMS-Erinnerungsfeld,
+ * andere Telefon-Fragen und der „Wir rufen an“-Ort liefern die Nummer nur für Close/Zuordnung.
+ */
+export function telefonAusCalendly(p: NonNullable<CalendlyWebhook["payload"]>): { telefon: string | null; optIn: boolean } {
+  const wa = p.questions_and_answers?.find((qa) => WHATSAPP_FRAGE.test(qa.question));
+  const waNummer = normalisiereTelefon(wa?.answer);
+  if (waNummer) return { telefon: waNummer, optIn: true };
   const kandidaten = [
     p.text_reminder_number,
     p.questions_and_answers?.find((qa) => TELEFON_FRAGE.test(qa.question))?.answer,
@@ -60,9 +79,9 @@ export function telefonAusCalendly(p: NonNullable<CalendlyWebhook["payload"]>): 
   ];
   for (const k of kandidaten) {
     const t = normalisiereTelefon(k);
-    if (t) return t;
+    if (t) return { telefon: t, optIn: false };
   }
-  return null;
+  return { telefon: null, optIn: false };
 }
 
 /** Lesbarer Ort für {{4}} im Strategiegespräch. */
@@ -95,8 +114,17 @@ export async function verarbeiteCalendly(
   if (!art) return { ignoriert: `Terminart „${ev.name ?? "?"}“ nicht zugeordnet` };
 
   if (body.event === "invitee.canceled") {
-    const { data } = await svc.from("wa_termine").select("*").eq("calendly_event_uri", ev.uri).maybeSingle();
-    if (!data) return { ignoriert: "Termin unbekannt" };
+    const { data, error } = await svc.from("wa_termine").select("*").eq("calendly_event_uri", ev.uri).maybeSingle();
+    if (error) throw new Error(`Terminsuche fehlgeschlagen: ${error.message}`);
+    if (!data) {
+      // Absage vor der Buchung angekommen → Platzhalter, damit „created“ den Termin nicht anlegt
+      await legeAbsagePlatzhalterAn(
+        svc,
+        { art, calendly_event_uri: ev.uri, start_at: new Date(ev.start_time ?? jetzt).toISOString() },
+        jetzt,
+      );
+      return { aktion: "absage_vorgemerkt" };
+    }
     // Verschiebung = Absage + neue Buchung → keine „abgesagt“-Nachricht
     await sagTerminAb(svc, data as Termin, {
       nachricht: p.rescheduled !== true,
@@ -108,7 +136,7 @@ export async function verarbeiteCalendly(
 
   if (body.event !== "invitee.created" || !ev.start_time) return { ignoriert: body.event ?? "ohne Event" };
 
-  const telefon = telefonAusCalendly(p);
+  const { telefon, optIn } = telefonAusCalendly(p);
   const email = p.email?.trim().toLowerCase() || null;
   const gastgeber = ev.event_memberships?.[0];
   const [closeLeadId, closeUserId] = await Promise.all([
@@ -135,8 +163,8 @@ export async function verarbeiteCalendly(
     firma: p.questions_and_answers?.find((qa) => /unternehmen|firma/i.test(qa.question))?.answer?.trim() || null,
     telefon,
     email,
-    // Nummer freiwillig angegeben = Einwilligung in Termin-Nachrichten
-    opt_in: !!telefon,
+    // Einwilligung nur über die WhatsApp-Frage
+    opt_in: optIn,
   };
   const r = await legeTerminAn(svc, eingabe, jetzt);
   return { aktion: r.aktion, termin: r.termin.id, startGeaendert: r.startGeaendert };
@@ -168,13 +196,23 @@ export async function verarbeiteCloseProtokoll(
   // Protokoll zum Gespräch selbst → Termin verpasst bzw. stattgefunden
   const gespraech: TerminArt | null = e.typ === "setting" ? "erstgespraech" : e.typ === "closing" ? "strategie" : null;
   if (gespraech) {
-    const termin = await letzterTerminDesLeads(svc, leadId, gespraech, jetzt);
-    if (termin) {
-      if (istNoShow(e.wert)) {
-        await markiereVerpasst(svc, termin, jetzt);
-        ergebnis.verpasst = termin.id;
+    // Zuordnung Protokoll → Termin ist dauerhaft (ergebnis_protokoll_id): Wiederholung = No-Op
+    const zugeordnet = await terminZumErgebnisProtokoll(svc, e.protokoll.id);
+    if (zugeordnet) {
+      // Nachträglich auf No-Show geändert → noch nachholen; alles andere bleibt
+      if (istNoShow(e.wert) && zugeordnet.status === "stattgefunden") {
+        await markiereVerpasst(svc, zugeordnet, e.protokoll.id, jetzt);
+        ergebnis.verpasst = zugeordnet.id;
       } else {
-        await markiereStattgefunden(svc, termin);
+        ergebnis.bereitsZugeordnet = zugeordnet.id;
+      }
+    } else {
+      const termin = await letzterTerminDesLeads(svc, leadId, gespraech, jetzt);
+      if (termin && istNoShow(e.wert)) {
+        await markiereVerpasst(svc, termin, e.protokoll.id, jetzt);
+        ergebnis.verpasst = termin.id;
+      } else if (termin) {
+        await markiereStattgefunden(svc, termin, e.protokoll.id);
         ergebnis.stattgefunden = termin.id;
       }
     }
@@ -190,6 +228,10 @@ export async function verarbeiteCloseProtokoll(
   if (!neueArt) return ergebnis;
   if (!e.kalender || Number.isNaN(new Date(e.kalender).getTime())) {
     return { ...ergebnis, warnung: "Termin ohne Kalender-Datum" };
+  }
+  if (!hatUhrzeit(e.kalender)) {
+    await notizSicher(leadId, "WhatsApp nicht gesendet: Termin ohne Uhrzeit");
+    return { ...ergebnis, warnung: "Termin ohne Uhrzeit" };
   }
 
   const [lead, einstellungen, gastgeberName] = await Promise.all([

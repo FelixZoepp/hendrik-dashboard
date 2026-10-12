@@ -188,7 +188,10 @@ export function normalisiereTelefon(roh: string | null | undefined): string | nu
   if (sauber.startsWith("+")) ziffern = sauber.slice(1).replace(/\+/g, "");
   else if (sauber.startsWith("00")) ziffern = sauber.slice(2);
   else if (sauber.startsWith("0")) ziffern = `49${sauber.slice(1)}`;
-  else ziffern = sauber; // WhatsApp liefert "4915112345678"
+  else if (sauber.startsWith("49")) ziffern = sauber; // WhatsApp liefert "4915112345678"
+  // Ohne Vorwahl-Präfix: deutsche Mobilnummer ohne führende 0 ("15123456789")
+  else if (sauber.startsWith("1") && sauber.length >= 10 && sauber.length <= 11) ziffern = `49${sauber}`;
+  else return null;
   // "+49 (0) 151 …" → führende 0 nach der Ländervorwahl entfernen
   if (ziffern.startsWith("490")) ziffern = `49${ziffern.slice(3)}`;
   if (ziffern.length < 8 || ziffern.length > 15) return null;
@@ -350,17 +353,36 @@ export type TerminDaten = TerminKern & Partial<Record<(typeof TERMIN_FELDER)[num
   opt_in?: boolean;
 };
 
+export interface ZusammenfuehrErgebnis {
+  patch: Partial<TerminDaten>;
+  /** Start hat sich geändert → geplante Jobs auf den neuen Start umrechnen ('gebucht' nie neu) */
+  startGeaendert: boolean;
+  /** Echte Verschiebung → Bestätigung zurücksetzen */
+  bestaetigungZuruecksetzen: boolean;
+  /** Einwilligung neu gewonnen (false → true) */
+  optInGewonnen: boolean;
+}
+
+/** Gleiche Quelle: ab dieser Abweichung gilt eine Startänderung als Verschiebung. */
+export const VERSCHIEBUNG_GLEICHE_QUELLE_MS = 5 * MIN;
+/** Zwei Quellen (Calendly + Close): bis zu dieser Abweichung derselbe Termin, keine Verschiebung. */
+export const VERSCHIEBUNG_ANDERE_QUELLE_MS = 15 * MIN;
+
 /**
  * Änderungen für einen bestehenden Termin aus neuen Daten.
- * Calendly hat Vorrang: Calendly-Daten überschreiben, Close-Daten füllen nur Lücken
- * (außer der bestehende Termin stammt selbst nur aus Close — dann gilt der neuere Stand).
- * opt_in bleibt erhalten, sobald eine Quelle ihn gibt.
+ * - Calendly hat Vorrang: Calendly-Daten überschreiben, Close-Daten füllen nur Lücken
+ *   (außer der bestehende Termin stammt nur aus Close oder es ist dieselbe Quelle).
+ * - Einwilligung hängt an der Nummer: neue/andere Nummer → opt_in der neuen Quelle
+ *   (nie ein altes true behalten). Gleiche Nummer: gleiche Quelle → neuer Stand,
+ *   andere Quelle → true, sobald eine Quelle es gibt.
+ * - gleicheQuelle = Treffer über calendly_event_uri bzw. close_protokoll_id.
  */
 export function zusammenfuehren(
   bestehend: TerminDaten,
   neu: TerminDaten,
-): { patch: Partial<TerminDaten>; startGeaendert: boolean } {
-  const ueberschreiben = neu.quelle === "calendly" || bestehend.quelle === "close";
+  gleicheQuelle = false,
+): ZusammenfuehrErgebnis {
+  const ueberschreiben = gleicheQuelle || neu.quelle === "calendly" || bestehend.quelle === "close";
   const patch: Record<string, unknown> = {};
   for (const feld of TERMIN_FELDER) {
     const wert = neu[feld];
@@ -370,13 +392,28 @@ export function zusammenfuehren(
     if (ueberschreiben || alt === undefined || alt === null || alt === "") patch[feld] = wert;
   }
   if (neu.quelle === "calendly" && bestehend.quelle !== "calendly") patch.quelle = "calendly";
-  if (neu.opt_in && !bestehend.opt_in) patch.opt_in = true;
 
-  const startGeaendert =
-    typeof patch.start_at === "string" &&
-    new Date(patch.start_at).getTime() !== new Date(bestehend.start_at).getTime();
-  if (typeof patch.start_at === "string" && !startGeaendert) delete patch.start_at;
-  return { patch: patch as Partial<TerminDaten>, startGeaendert };
+  // Einwilligung an die Telefonnummer binden
+  const altOptIn = !!bestehend.opt_in;
+  let optIn = altOptIn;
+  if (typeof patch.telefon === "string") optIn = !!neu.opt_in;
+  else if (neu.telefon && neu.telefon === bestehend.telefon && neu.opt_in !== undefined) {
+    optIn = gleicheQuelle ? !!neu.opt_in : altOptIn || !!neu.opt_in;
+  }
+  if (optIn !== altOptIn) patch.opt_in = optIn;
+
+  let diff = 0;
+  if (typeof patch.start_at === "string") {
+    diff = Math.abs(new Date(patch.start_at).getTime() - new Date(bestehend.start_at).getTime());
+    if (diff === 0) delete patch.start_at;
+  }
+  const grenze = gleicheQuelle ? VERSCHIEBUNG_GLEICHE_QUELLE_MS : VERSCHIEBUNG_ANDERE_QUELLE_MS;
+  return {
+    patch: patch as Partial<TerminDaten>,
+    startGeaendert: diff > 0,
+    bestaetigungZuruecksetzen: diff > grenze,
+    optInGewonnen: optIn && !altOptIn,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -401,6 +438,7 @@ export function zufallsToken(laenge = 14): string {
 
 /** Status-Rangfolge ausgehender Nachrichten — nie zurückstufen. */
 export const STATUS_RANG: Record<string, number> = {
+  reserviert: 0,
   gesendet: 1,
   zugestellt: 2,
   gelesen: 3,
@@ -409,6 +447,61 @@ export const STATUS_RANG: Record<string, number> = {
 
 export function darfStatusSetzen(alt: string | null | undefined, neu: string): boolean {
   if (!alt) return true;
-  if (neu === "fehlgeschlagen") return alt === "gesendet";
+  if (neu === "fehlgeschlagen") return alt === "gesendet" || alt === "reserviert";
   return (STATUS_RANG[neu] ?? 0) > (STATUS_RANG[alt] ?? 0) && alt !== "fehlgeschlagen";
+}
+
+// ---------------------------------------------------------------------------
+// Versand-Regeln
+// ---------------------------------------------------------------------------
+
+/**
+ * Eindeutiger Versand-Schlüssel gegen Doppel-Versand (unique in wa_nachrichten).
+ * „gebucht“: je Nummer, Art und Berliner Kalendertag — egal, ob die Quellen beim Start
+ * leicht abweichen. Sonst: Nummer, Vorlage und Start (auf die Minute).
+ */
+export function versandSchluessel(
+  telefon: string,
+  vorlage: string,
+  typ: JobTyp,
+  art: TerminArt,
+  start: Date,
+): string {
+  if (typ === "gebucht") return `${telefon}|${art}|gebucht|${berlinDatum(start)}`;
+  return `${telefon}|${vorlage}|${start.toISOString().slice(0, 16)}`;
+}
+
+/** „gleich“-Nachricht nur, wenn die Sendezeit höchstens 5 Min. vom Soll (Start − Vorlauf) abweicht. */
+export function gleichNochPassend(start: Date, art: TerminArt, jetzt: Date): boolean {
+  const soll = start.getTime() - GLEICH_VORLAUF_MS[art];
+  return Math.abs(jetzt.getTime() - soll) <= 5 * MIN;
+}
+
+/**
+ * Späteste Sendezeit einer Nachricht:
+ * Termin-Nachrichten bis Terminbeginn; „abgesagt“ solange der Termin in der Zukunft
+ * liegt oder bis 12 Std. nach der Absage; „verpasst“ bis 24 Std. nach dem Termin.
+ */
+export function sendeFrist(typ: JobTyp, start: Date, abgesagtAm: Date | null): Date {
+  if (typ === "verpasst") return new Date(start.getTime() + 24 * STUNDE);
+  if (typ === "abgesagt") {
+    const nachAbsage = abgesagtAm ? abgesagtAm.getTime() + 12 * STUNDE : 0;
+    return new Date(Math.max(start.getTime(), nachAbsage));
+  }
+  return start;
+}
+
+/** Enthält ein Close-Kalenderwert eine Uhrzeit? (reines Datum "YYYY-MM-DD" → nein) */
+export function hatUhrzeit(wert: string | null | undefined): boolean {
+  if (!wert) return false;
+  const t = wert.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return false;
+  return !Number.isNaN(new Date(t).getTime()) && /\d{2}:\d{2}/.test(t);
+}
+
+/** Nachrichtentypen ohne echten Inhalt: keine Aufgabe, keine Antwort-Erkennung. */
+const OHNE_INHALT = new Set(["reaction", "system", "unsupported", "unknown", "ephemeral", "request_welcome"]);
+
+export function istOhneInhalt(typ: string): boolean {
+  return OHNE_INHALT.has(typ);
 }

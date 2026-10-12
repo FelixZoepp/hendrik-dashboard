@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { aufgabeAnLead, findeCloseLead, notizSicher } from "./close-log";
 import { ladeEinstellungen } from "./einstellungen";
 import { istDirektesVideo, sendeFreitext, sendeVideo } from "./gate";
-import { berlinDatum, erkenneAntwort, formatDatum, formatUhrzeit, normalisiereTelefon } from "./logik";
+import { berlinDatum, erkenneAntwort, formatDatum, formatUhrzeit, istOhneInhalt, normalisiereTelefon } from "./logik";
 import { brecheJobsAb, type Termin } from "./termine";
 import { AUFGABEN, FREITEXTE } from "./vorlagen";
 
@@ -48,17 +48,14 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
   if (!telefon) return { ignoriert: "Nummer unbrauchbar" };
   const jetzt = e.zeit;
 
-  // Doppelte Zustellung durch Meta → nur einmal verarbeiten
-  const { data: vorhanden } = await svc.from("wa_nachrichten").select("id").eq("wa_message_id", e.waMessageId).maybeSingle();
-  if (vorhanden) return { ignoriert: "bereits verarbeitet" };
-
+  // Dedupe läuft über wa_eingang.status = 'verarbeitet'; ein erneuter Versuch nach Fehler darf hier durch
   const termin = await terminZurNachricht(svc, telefon, e.buttonPayload, jetzt);
   const { data: k } = await svc.from("wa_kontakte").select("close_lead_id").eq("telefon", telefon).maybeSingle();
   let closeLeadId =
     termin?.close_lead_id ?? (k as { close_lead_id: string | null } | null)?.close_lead_id ?? null;
   if (!closeLeadId) closeLeadId = await findeCloseLead(svc, { telefon }).catch(() => null);
 
-  await svc.from("wa_kontakte").upsert(
+  const { error: kFehler } = await svc.from("wa_kontakte").upsert(
     {
       telefon,
       fenster_bis: new Date(jetzt.getTime() + 24 * 60 * 60_000).toISOString(),
@@ -67,6 +64,7 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
     },
     { onConflict: "telefon" },
   );
+  if (kFehler) throw new Error(`Kontakt nicht gespeichert: ${kFehler.message}`);
 
   const { error: insertFehler } = await svc.from("wa_nachrichten").insert({
     richtung: "ein",
@@ -79,17 +77,24 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
     status: "empfangen",
     payload: e.payload ?? null,
   });
-  if (insertFehler?.code === "23505") return { ignoriert: "bereits verarbeitet" };
-  if (insertFehler) throw new Error(`Nachricht nicht gespeichert: ${insertFehler.message}`);
+  // 23505: Nachricht wurde in einem früheren (abgebrochenen) Versuch schon gespeichert → weiter
+  if (insertFehler && insertFehler.code !== "23505") throw new Error(`Nachricht nicht gespeichert: ${insertFehler.message}`);
 
   await notizSicher(closeLeadId, `WhatsApp empfangen: ${e.text || `[${e.typ}]`}`);
+
+  // Reaktionen (auch 👍) und System-/nicht unterstützte Nachrichten: nur Notiz, keine Aufgabe, keine Bestätigung
+  if (istOhneInhalt(e.typ)) return { aktion: "nur_notiz", typ: e.typ };
 
   const knopf = e.buttonPayload?.split("|")[0];
   const art =
     knopf === "bestaetigen" ? "bestaetigen" : knopf === "verschieben" ? "verschieben" : erkenneAntwort(e.text);
 
   if (art === "stop") {
-    await svc.from("wa_kontakte").update({ opt_out: true, updated_at: jetzt.toISOString() }).eq("telefon", telefon);
+    // Abmeldung zuerst sicher speichern — schlägt das fehl, wird der ganze Eingang wiederholt
+    const { error: stopFehler } = await svc
+      .from("wa_kontakte")
+      .upsert({ telefon, opt_out: true, updated_at: jetzt.toISOString() }, { onConflict: "telefon" });
+    if (stopFehler) throw new Error(`Abmeldung nicht gespeichert: ${stopFehler.message}`);
     const { data: offen } = await svc.from("wa_termine").select("id").eq("telefon", telefon).eq("status", "geplant");
     await brecheJobsAb(
       svc,

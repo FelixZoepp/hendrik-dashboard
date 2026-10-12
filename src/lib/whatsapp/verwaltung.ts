@@ -19,7 +19,7 @@ export async function reicheVorlageEin(svc: SupabaseClient, name: string): Promi
   const { error } = await svc.from("wa_vorlagen").upsert(
     {
       name: v.name,
-      kategorie: v.kategorie,
+      kategorie: (r.category ?? v.kategorie).toUpperCase(),
       sprache: v.sprache,
       status: r.status.toUpperCase(),
       meta_id: r.id,
@@ -42,9 +42,9 @@ export async function gleicheVorlagenAb(svc: SupabaseClient): Promise<number> {
     const { error } = await svc.from("wa_vorlagen").upsert(
       {
         name: t.name,
-        kategorie: t.category,
+        kategorie: t.category?.toUpperCase() ?? null,
         sprache: t.language,
-        status: t.status.toUpperCase(),
+        status: t.status.toUpperCase() === "REINSTATED" ? "APPROVED" : t.status.toUpperCase(),
         meta_id: t.id,
         ablehnungsgrund: t.rejected_reason && t.rejected_reason !== "NONE" ? t.rejected_reason : null,
         geprueft_am: jetzt,

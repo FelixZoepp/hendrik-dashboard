@@ -50,7 +50,10 @@ create table public.wa_termine (
   ort_text              text,
   close_lead_id         text,
   close_opp_id          text,
-  close_protokoll_id    text,
+  -- Protokoll, das den Termin gelegt hat (je Protokoll höchstens ein Termin)
+  close_protokoll_id    text unique,
+  -- Protokoll, das das Ergebnis (No-Show/stattgefunden) festgehalten hat
+  ergebnis_protokoll_id text unique,
   -- Zuständige Person in Close (gelegtAuf bzw. Calendly-Gastgeber) für Aufgaben
   close_user_id         text,
   gastgeber_name        text,
@@ -66,6 +69,7 @@ create table public.wa_termine (
   opt_in                boolean not null default false,
   bestaetigt_am         timestamptz,
   verschieben_am        timestamptz,
+  abgesagt_am           timestamptz,
   created_at            timestamptz not null default now(),
   updated_at            timestamptz not null default now()
 );
@@ -74,7 +78,6 @@ create index wa_termine_start_idx on public.wa_termine(start_at);
 create index wa_termine_telefon_idx on public.wa_termine(telefon);
 create index wa_termine_lead_idx on public.wa_termine(close_lead_id);
 create index wa_termine_email_idx on public.wa_termine(lower(email));
-create index wa_termine_protokoll_idx on public.wa_termine(close_protokoll_id);
 
 create trigger wa_termine_updated_at
   before update on public.wa_termine
@@ -89,6 +92,8 @@ create table public.wa_jobs (
   typ         text not null
               check (typ in ('gebucht', 'erinnerung', 'unbestaetigt_check', 'gleich', 'verpasst', 'abgesagt')),
   run_at      timestamptz not null,
+  -- Feste Deadline: Überfälligkeit (15 Min.) zählt ab hier; Wiederholungen verschieben sie nicht
+  faellig_urspruenglich timestamptz not null,
   status      text not null default 'geplant'
               check (status in ('geplant', 'laeuft', 'erledigt', 'uebersprungen', 'abgebrochen', 'fehler')),
   versuche    integer not null default 0,
@@ -114,8 +119,10 @@ create table public.wa_nachrichten (
   vorlage         text,
   body            text,
   wa_message_id   text unique,
+  -- Versand-Reservierung gegen Doppel-Versand (Telefon|Vorlage|Termin); bei eindeutigem Fehler wieder null
+  versand_schluessel text unique,
   status          text not null
-                  check (status in ('gesendet', 'zugestellt', 'gelesen', 'fehlgeschlagen', 'empfangen')),
+                  check (status in ('reserviert', 'gesendet', 'zugestellt', 'gelesen', 'fehlgeschlagen', 'empfangen')),
   fehler          text,
   payload         jsonb,
   created_at      timestamptz not null default now()
@@ -124,6 +131,22 @@ create table public.wa_nachrichten (
 create index wa_nachrichten_created_idx on public.wa_nachrichten(created_at desc);
 create index wa_nachrichten_termin_idx on public.wa_nachrichten(termin_id);
 create index wa_nachrichten_telefon_idx on public.wa_nachrichten(telefon);
+
+-- ------------------------------------------------------------
+-- Eingang: Rohereignisse von Meta (vor der 200-Antwort gespeichert, Cron arbeitet nach)
+-- ------------------------------------------------------------
+create table public.wa_eingang (
+  id             uuid primary key default gen_random_uuid(),
+  wa_message_id  text not null unique,
+  payload        jsonb not null,
+  status         text not null default 'neu' check (status in ('neu', 'verarbeitet', 'fehler')),
+  versuche       integer not null default 0,
+  fehler         text,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+
+create index wa_eingang_offen_idx on public.wa_eingang(status, created_at);
 
 -- ------------------------------------------------------------
 -- Kontakte (Abmeldung + 24-h-Servicefenster)
@@ -158,17 +181,19 @@ alter table public.wa_termine enable row level security;
 alter table public.wa_jobs enable row level security;
 alter table public.wa_nachrichten enable row level security;
 alter table public.wa_kontakte enable row level security;
+alter table public.wa_eingang enable row level security;
 alter table public.wa_vorlagen enable row level security;
 
 revoke all on public.wa_einstellungen, public.wa_termine, public.wa_jobs,
-  public.wa_nachrichten, public.wa_kontakte, public.wa_vorlagen
+  public.wa_nachrichten, public.wa_kontakte, public.wa_vorlagen, public.wa_eingang
   from anon, authenticated;
 
 -- ------------------------------------------------------------
--- Fällige Jobs sperren und übernehmen (mehrere Cron-Läufe parallel möglich)
--- Holt auch hängende 'laeuft'-Jobs (> 5 Min.) zurück; nach 3 Versuchen → 'fehler'.
+-- Fällige Jobs sperren und übernehmen (mehrere Cron-Läufe parallel möglich).
+-- Hängende 'laeuft'-Jobs (> 5 Min.) werden NICHT erneut gesendet, sondern als
+-- 'fehler' (Ergebnis unklar) markiert — lieber keine als eine doppelte Nachricht.
 -- ------------------------------------------------------------
-create or replace function public.wa_jobs_claim(p_limit integer default 10)
+create or replace function public.wa_jobs_claim(p_limit integer default 5)
 returns setof public.wa_jobs
 language plpgsql
 security definer
@@ -177,10 +202,9 @@ as $$
 begin
   update public.wa_jobs
      set status = 'fehler',
-         fehler = coalesce(fehler, 'Abgebrochen: hing nach 3 Versuchen in Bearbeitung')
+         fehler = 'Ergebnis unklar: Bearbeitung brach nach mehr als 5 Min. ab — bitte prüfen, kein automatischer Neuversand'
    where status = 'laeuft'
-     and claimed_at < now() - interval '5 minutes'
-     and versuche >= 3;
+     and claimed_at < now() - interval '5 minutes';
 
   return query
   update public.wa_jobs j
@@ -190,8 +214,7 @@ begin
    where j.id in (
      select x.id
        from public.wa_jobs x
-      where (x.status = 'geplant' and x.run_at <= now())
-         or (x.status = 'laeuft' and x.claimed_at < now() - interval '5 minutes')
+      where x.status = 'geplant' and x.run_at <= now()
       order by x.run_at
       limit p_limit
       for update skip locked

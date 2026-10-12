@@ -39,7 +39,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Webhook nicht konfiguriert" }, { status: 503 });
   }
   if (!pruefeSignatur(body, request.headers.get("calendly-webhook-signature"), key)) {
-    await logFehler({ body: body.slice(0, 500) }, "Ungültige Signatur");
+    // Keine Inhalte speichern (personenbezogen) — nur Hinweise zur Fehlersuche
+    const header = request.headers.get("calendly-webhook-signature");
+    await logFehler(
+      { signatur_header: !!header, zeitstempel: header?.match(/t=(\d+)/)?.[1] ?? null, laenge: body.length },
+      "Ungültige Signatur",
+    );
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

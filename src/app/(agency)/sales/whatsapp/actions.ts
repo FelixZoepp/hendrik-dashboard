@@ -24,8 +24,8 @@ async function nurFreigeschaltet() {
 const fehlerText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export async function pinAktion(formData: FormData) {
-  const ok = await schalteFrei(String(formData.get("pin") ?? ""));
-  zurueck(ok ? "Freigeschaltet (12 Stunden)." : "PIN falsch.", !ok);
+  const r = await schalteFrei(String(formData.get("pin") ?? ""));
+  zurueck(r.meldung, !r.ok);
 }
 
 export async function sperrenAktion() {

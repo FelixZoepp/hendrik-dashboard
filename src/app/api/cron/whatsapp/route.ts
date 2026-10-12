@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { waVerbindung } from "@/lib/whatsapp/client";
 import { ladeEinstellungen, speichereEinstellung } from "@/lib/whatsapp/einstellungen";
+import { verarbeiteOffeneEingaenge } from "@/lib/whatsapp/eingang";
 import { verarbeiteJobs } from "@/lib/whatsapp/jobs";
 import { gleicheVorlagenAb } from "@/lib/whatsapp/verwaltung";
 
 // WhatsApp-Terminbot: minütlich per Supabase pg_cron + pg_net (supabase/cron_whatsapp.sql).
-// Arbeitet fällige Jobs ab (max. ~50 s) und gleicht stündlich den Vorlagen-Status bei Meta ab.
+// Arbeitet liegengebliebene Eingänge und fällige Jobs ab (max. ~50 s) und gleicht stündlich
+// den Vorlagen-Status bei Meta ab.
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -23,7 +25,15 @@ export async function GET(request: Request) {
   const antwort: Record<string, unknown> = {};
 
   try {
-    antwort.jobs = await verarbeiteJobs(supabase, { budgetMs: 45_000 });
+    antwort.eingang = await verarbeiteOffeneEingaenge(supabase, { budgetMs: 10_000 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "eingang" }, error: message });
+    antwort.eingangFehler = message;
+  }
+
+  try {
+    antwort.jobs = await verarbeiteJobs(supabase, { budgetMs: 35_000 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "jobs" }, error: message });

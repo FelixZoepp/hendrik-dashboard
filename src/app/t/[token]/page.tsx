@@ -3,8 +3,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { terminBasisUrl } from "@/lib/whatsapp/client";
 import { ladeEinstellungen } from "@/lib/whatsapp/einstellungen";
 import { istDirektesVideo } from "@/lib/whatsapp/gate";
-import { googleLink, outlookLink, terminOrt, terminTitel } from "@/lib/whatsapp/kalender";
-import { anredeName, formatUhrzeit, TZ } from "@/lib/whatsapp/logik";
+import { googleLink, outlookLink } from "@/lib/whatsapp/kalender";
+import { formatUhrzeit, TZ } from "@/lib/whatsapp/logik";
 import { ladeTerminPerToken, type Termin } from "@/lib/whatsapp/termine";
 import { bestaetigenAktion, verschiebenAktion } from "./actions";
 
@@ -15,7 +15,10 @@ const KNOPF =
 const KNOPF_PRIMAER = `${KNOPF} fern-btn-primary text-primary-foreground shadow-sm`;
 const KNOPF_SEKUNDAER = `${KNOPF} bg-card text-foreground shadow-[inset_0_0_0_1.5px_var(--border)]`;
 
-/** Öffentliche Termin-Seite hinter den Knöpfen der WhatsApp-Nachrichten. Keine Telefonnummer/E-Mail anzeigen. */
+/**
+ * Öffentliche Termin-Seite hinter den Knöpfen der WhatsApp-Nachrichten.
+ * Bewusst ohne personenbezogene Daten: kein Name, keine Telefonnummer/E-Mail, Ort nur generisch.
+ */
 export default async function TerminSeite({
   params,
   searchParams,
@@ -85,8 +88,10 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
   return (
     <div className="space-y-4">
       <div className="fern-card p-6">
-        <p className="text-[15px] text-muted-foreground">Guten Tag {anredeName(termin.name, termin.vorname, termin.firma)},</p>
-        <h1 className="mt-1 text-2xl font-semibold leading-tight tracking-tight">{terminTitel(termin.art)}</h1>
+        <h1 className="text-2xl font-semibold leading-tight tracking-tight">Ihr Termin mit Hoffmann Solutions</h1>
+        <p className="mt-1 text-[15px] text-muted-foreground">
+          {termin.art === "strategie" ? "Strategiegespräch" : "Kostenfreies Erstgespräch"}
+        </p>
 
         <div className="mt-5 space-y-3 rounded-2xl bg-muted p-4 text-[15px]">
           <p className="flex items-start gap-2.5">
@@ -100,7 +105,7 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
           </p>
           <p className="flex items-start gap-2.5">
             <MapPin className="mt-0.5 size-4 flex-none text-primary" />
-            <span>{terminOrt(termin)}</span>
+            <span>{termin.art === "erstgespraech" ? "Telefonat – wir rufen Sie an" : "Videocall"}</span>
           </p>
         </div>
 

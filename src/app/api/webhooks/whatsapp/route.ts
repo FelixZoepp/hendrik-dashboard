@@ -1,11 +1,12 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { verarbeiteEingang } from "@/lib/whatsapp/antworten";
-import { darfStatusSetzen, normalisiereTelefon } from "@/lib/whatsapp/logik";
+import { speichereEingang, verarbeiteOffeneEingaenge, type WaNachricht } from "@/lib/whatsapp/eingang";
+import { darfStatusSetzen } from "@/lib/whatsapp/logik";
 
 // WhatsApp-Webhook (Meta Cloud API): eingehende Nachrichten, Zustellstatus,
-// Freigabe-Status der Vorlagen. Antwortet sofort mit 200, verarbeitet danach.
+// Freigabe-Status/Kategorie der Vorlagen. Eingehende Nachrichten werden VOR der 200-Antwort
+// dauerhaft gespeichert (wa_eingang), die Verarbeitung läuft danach; der Cron arbeitet nach.
 
 export const maxDuration = 60;
 
@@ -27,19 +28,6 @@ function pruefeSignatur(body: string, header: string | null): boolean {
   return erwartet.length === erhalten.length && timingSafeEqual(erwartet, erhalten);
 }
 
-interface WaNachricht {
-  id: string;
-  from: string;
-  timestamp?: string;
-  type: string;
-  text?: { body?: string };
-  button?: { text?: string; payload?: string };
-  interactive?: {
-    button_reply?: { id?: string; title?: string };
-    list_reply?: { id?: string; title?: string };
-  };
-}
-
 interface WaStatus {
   id: string;
   status: "sent" | "delivered" | "read" | "failed" | string;
@@ -51,13 +39,14 @@ interface WaWebhook {
     changes?: Array<{
       field?: string;
       value?: {
-        messages?: WaNachricht[];
+        messages?: unknown[];
         statuses?: WaStatus[];
         event?: string;
         message_template_name?: string;
         message_template_language?: string;
         message_template_id?: number | string;
         reason?: string | null;
+        new_category?: string;
       };
     }>;
   }>;
@@ -70,14 +59,10 @@ const STATUS: Record<string, string> = {
   failed: "fehlgeschlagen",
 };
 
-function nachrichtText(m: WaNachricht): string {
-  return (
-    m.button?.text ??
-    m.interactive?.button_reply?.title ??
-    m.interactive?.list_reply?.title ??
-    m.text?.body ??
-    `[${m.type}]`
-  );
+/** Meta-Ereignis → Status in wa_vorlagen (REINSTATED = wieder freigegeben). */
+function vorlagenStatus(event: string): string {
+  const e = event.toUpperCase();
+  return e === "REINSTATED" ? "APPROVED" : e;
 }
 
 async function verarbeite(body: WaWebhook) {
@@ -90,25 +75,6 @@ async function verarbeite(body: WaWebhook) {
       const value = change.value ?? {};
 
       if (change.field === "messages") {
-        for (const m of value.messages ?? []) {
-          try {
-            await verarbeiteEingang(svc, {
-              telefonRoh: m.from,
-              waMessageId: m.id,
-              typ: m.type,
-              text: nachrichtText(m),
-              buttonPayload: m.button?.payload ?? m.interactive?.button_reply?.id ?? null,
-              zeit: m.timestamp ? new Date(Number(m.timestamp) * 1000) : new Date(),
-              payload: m,
-            });
-          } catch (err) {
-            await logFehler(
-              { wa_message_id: m.id, von: normalisiereTelefon(m.from) },
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-        }
-
         for (const s of value.statuses ?? []) {
           const neu = STATUS[s.status];
           if (!neu) continue;
@@ -132,9 +98,20 @@ async function verarbeite(body: WaWebhook) {
         }
       }
 
+      if (change.field === "message_template_category_update" && value.message_template_name && value.new_category) {
+        try {
+          await svc
+            .from("wa_vorlagen")
+            .update({ kategorie: value.new_category.toUpperCase(), geprueft_am: new Date().toISOString() })
+            .eq("name", value.message_template_name);
+        } catch (err) {
+          await logFehler({ vorlage: value.message_template_name }, err instanceof Error ? err.message : String(err));
+        }
+      }
+
       if (change.field === "message_template_status_update" && value.message_template_name) {
         try {
-          const status = (value.event ?? "").toUpperCase();
+          const status = vorlagenStatus(value.event ?? "");
           await svc.from("wa_vorlagen").upsert(
             {
               name: value.message_template_name,
@@ -167,9 +144,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Ungültiges JSON" }, { status: 400 });
   }
 
-  // Sofort quittieren — Meta wiederholt sonst; Verarbeitung läuft nach der Antwort weiter
+  // Eingehende Nachrichten dauerhaft speichern, bevor wir quittieren (sonst 500 → Meta wiederholt)
+  const nachrichten: WaNachricht[] = (daten.entry ?? []).flatMap((e) =>
+    (e.changes ?? []).filter((c) => c.field === "messages").flatMap((c) => (c.value?.messages ?? []) as WaNachricht[]),
+  );
+  try {
+    const svc = createAdminClient();
+    for (const m of nachrichten) await speichereEingang(svc, m);
+  } catch (err) {
+    console.error("[whatsapp] Eingang nicht gespeichert:", err);
+    return NextResponse.json({ error: "Speichern fehlgeschlagen" }, { status: 500 });
+  }
+
+  // Sofort quittieren; Verarbeitung läuft nach der Antwort weiter (Cron arbeitet Reste nach)
   after(async () => {
     try {
+      const svc = createAdminClient();
+      await verarbeiteOffeneEingaenge(svc, { waMessageIds: nachrichten.map((m) => m.id), budgetMs: 40_000 });
       await verarbeite(daten);
     } catch (err) {
       await createAdminClient()

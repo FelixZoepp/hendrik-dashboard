@@ -2,6 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { closeApi, closeUserName, type CloseUser } from "@/lib/integrations/close";
 import { berlinDatum, normalisiereTelefon } from "./logik";
 
+const CLOSE_TIMEOUT_MS = 10_000;
+
+/** Close-Aufruf des Bots mit festem Zeitlimit (der Bot darf nie hängen bleiben). */
+function closeBot<T>(path: string, opts: Omit<NonNullable<Parameters<typeof closeApi>[1]>, "signal"> = {}): Promise<T> {
+  return closeApi<T>(path, { ...opts, signal: AbortSignal.timeout(CLOSE_TIMEOUT_MS) });
+}
+
 /**
  * Close-Anbindung des WhatsApp-Terminbots: Notizen und Aufgaben am Lead,
  * Lead-Suche per E-Mail/Telefon. Notizen/Aufgaben laufen immer (auch wenn der
@@ -11,7 +18,7 @@ import { berlinDatum, normalisiereTelefon } from "./logik";
 /** Notiz am Close-Lead (best effort — Fehler werden geworfen, Aufrufer fängt). */
 export async function notizAnLead(leadId: string | null | undefined, text: string): Promise<void> {
   if (!leadId) return;
-  await closeApi("/activity/note/", { method: "POST", body: { lead_id: leadId, note: text } });
+  await closeBot("/activity/note/", { method: "POST", body: { lead_id: leadId, note: text } });
 }
 
 /** Notiz ohne Fehlerweitergabe (für Protokollzwecke). */
@@ -34,11 +41,11 @@ export async function aufgabeAnLead(
 ): Promise<string | null> {
   if (!leadId) return null;
   const datum = opts.datum ?? berlinDatum(new Date());
-  const { data: offene } = await closeApi<{ data: Array<{ text: string; date: string | null }> }>("/task/", {
+  const { data: offene } = await closeBot<{ data: Array<{ text: string; date: string | null }> }>("/task/", {
     params: { lead_id: leadId, is_complete: "false", _fields: "text,date" },
   });
   if (offene.some((t) => t.text === text && t.date?.slice(0, 10) === datum.slice(0, 10))) return null;
-  const aufgabe = await closeApi<{ id: string }>("/task/", {
+  const aufgabe = await closeBot<{ id: string }>("/task/", {
     method: "POST",
     body: {
       _type: "lead",
@@ -67,7 +74,7 @@ export interface CloseLeadDaten {
 }
 
 export async function ladeLead(leadId: string): Promise<CloseLeadDaten> {
-  return closeApi<CloseLeadDaten>(`/lead/${leadId}/`);
+  return closeBot<CloseLeadDaten>(`/lead/${leadId}/`);
 }
 
 /** Name einer Close-Benutzer-ID (für den Gastgeber). */
@@ -76,7 +83,7 @@ export async function closeBenutzerName(svc: SupabaseClient, userId: string | nu
   const { data } = await svc.from("close_users").select("name").eq("close_id", userId).maybeSingle();
   if ((data as { name?: string } | null)?.name) return (data as { name: string }).name;
   try {
-    return closeUserName(await closeApi<CloseUser>(`/user/${userId}/`));
+    return closeUserName(await closeBot<CloseUser>(`/user/${userId}/`));
   } catch {
     return null;
   }
@@ -125,7 +132,7 @@ export async function findeCloseLead(
   if (telefon) suchen.push(`phone:"${telefon}"`);
   for (const query of suchen) {
     try {
-      const { data } = await closeApi<{ data: CloseLeadDaten[] }>("/lead/", {
+      const { data } = await closeBot<{ data: CloseLeadDaten[] }>("/lead/", {
         params: { query, _fields: "id,contacts", _limit: "5" },
       });
       const treffer = data.filter(passt);

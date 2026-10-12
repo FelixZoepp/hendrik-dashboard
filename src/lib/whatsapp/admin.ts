@@ -1,16 +1,28 @@
 import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * Schutz der Bot-Schalter im Dashboard (Auth ist im Projekt deaktiviert):
  * Eingabe von WHATSAPP_ADMIN_PIN → httpOnly-Cookie mit Ablaufzeit + HMAC (nicht der PIN selbst).
+ * PIN mindestens 10 Zeichen; nach 5 Fehlversuchen (global, in der DB gezählt) 15 Min. Sperre.
  */
+
+export const PIN_MINDESTLAENGE = 10;
+const MAX_FEHLVERSUCHE = 5;
+const SPERRE_MS = 15 * 60_000;
+const SPERR_KEY = "pin_sperre";
 
 const COOKIE = "wa_admin";
 const GUELTIG_S = 12 * 60 * 60;
 
+function sollPin(): string | null {
+  const pin = process.env.WHATSAPP_ADMIN_PIN?.trim();
+  return pin && pin.length >= PIN_MINDESTLAENGE ? pin : null;
+}
+
 function schluessel(): Buffer | null {
-  const pin = process.env.WHATSAPP_ADMIN_PIN;
+  const pin = sollPin();
   if (!pin) return null;
   // Server-Geheimnis einmischen, damit das Cookie nicht offline per PIN-Raten gefälscht werden kann
   return createHash("sha256")
@@ -28,8 +40,29 @@ function gleich(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
-export function adminPinGesetzt(): boolean {
-  return !!process.env.WHATSAPP_ADMIN_PIN;
+/** "fehlt" | "zu_kurz" | "ok" */
+export function adminPinZustand(): "fehlt" | "zu_kurz" | "ok" {
+  const pin = process.env.WHATSAPP_ADMIN_PIN?.trim();
+  if (!pin) return "fehlt";
+  return pin.length < PIN_MINDESTLAENGE ? "zu_kurz" : "ok";
+}
+
+interface PinSperre {
+  fehlversuche: number;
+  gesperrt_bis: string | null;
+}
+
+async function ladeSperre(): Promise<PinSperre> {
+  const { data, error } = await createAdminClient().from("wa_einstellungen").select("wert").eq("key", SPERR_KEY).maybeSingle();
+  if (error) throw new Error(`PIN-Sperre nicht lesbar: ${error.message}`);
+  const w = (data as { wert?: Partial<PinSperre> } | null)?.wert;
+  return { fehlversuche: Number(w?.fehlversuche ?? 0), gesperrt_bis: w?.gesperrt_bis ?? null };
+}
+
+async function speichereSperre(s: PinSperre): Promise<void> {
+  await createAdminClient()
+    .from("wa_einstellungen")
+    .upsert({ key: SPERR_KEY, wert: s, updated_at: new Date().toISOString() }, { onConflict: "key" });
 }
 
 export async function istFreigeschaltet(): Promise<boolean> {
@@ -43,16 +76,38 @@ export async function istFreigeschaltet(): Promise<boolean> {
 }
 
 /** PIN prüfen und bei Erfolg das Cookie setzen (nur in Server Actions aufrufen). */
-export async function schalteFrei(pin: string): Promise<boolean> {
+export async function schalteFrei(pin: string): Promise<{ ok: boolean; meldung: string }> {
+  const zustand = adminPinZustand();
+  if (zustand === "fehlt") return { ok: false, meldung: "WHATSAPP_ADMIN_PIN ist nicht gesetzt." };
+  if (zustand === "zu_kurz") return { ok: false, meldung: "PIN zu kurz – bitte in Vercel ändern (mind. 10 Zeichen)." };
   const key = schluessel();
-  const soll = process.env.WHATSAPP_ADMIN_PIN;
-  if (!key || !soll) return false;
+  const soll = sollPin();
+  if (!key || !soll) return { ok: false, meldung: "PIN nicht nutzbar." };
+
+  const sperre = await ladeSperre();
+  if (sperre.gesperrt_bis && new Date(sperre.gesperrt_bis).getTime() > Date.now()) {
+    return { ok: false, meldung: "Zu viele Fehlversuche – Freischaltung für 15 Minuten gesperrt." };
+  }
+
   const hash = (s: string) => createHash("sha256").update(s).digest("hex");
   if (!gleich(hash(pin.trim()), hash(soll))) {
+    const fehlversuche = sperre.fehlversuche + 1;
+    const gesperrt = fehlversuche >= MAX_FEHLVERSUCHE;
+    await speichereSperre({
+      fehlversuche: gesperrt ? 0 : fehlversuche,
+      gesperrt_bis: gesperrt ? new Date(Date.now() + SPERRE_MS).toISOString() : null,
+    });
     // Raten bremsen
     await new Promise((r) => setTimeout(r, 1500));
-    return false;
+    return {
+      ok: false,
+      meldung: gesperrt
+        ? "PIN falsch – zu viele Fehlversuche, 15 Minuten gesperrt."
+        : `PIN falsch (${fehlversuche} von ${MAX_FEHLVERSUCHE} Versuchen).`,
+    };
   }
+
+  if (sperre.fehlversuche > 0 || sperre.gesperrt_bis) await speichereSperre({ fehlversuche: 0, gesperrt_bis: null });
   const ablauf = Math.floor(Date.now() / 1000) + GUELTIG_S;
   (await cookies()).set(COOKIE, `${ablauf}.${signiere(ablauf, key)}`, {
     httpOnly: true,
@@ -61,7 +116,7 @@ export async function schalteFrei(pin: string): Promise<boolean> {
     path: "/sales/whatsapp",
     maxAge: GUELTIG_S,
   });
-  return true;
+  return { ok: true, meldung: "Freigeschaltet (12 Stunden)." };
 }
 
 export async function sperre(): Promise<void> {

@@ -12,13 +12,18 @@ import {
   erkenneAntwort,
   formatDatum,
   formatUhrzeit,
+  gleichNochPassend,
+  hatUhrzeit,
   istGleicherTermin,
+  istOhneInhalt,
   istRuhezeit,
   metaParameter,
   naechsterSendezeitpunkt,
   normalisiereTelefon,
   planeZeitplan,
   ruhezeitEntscheidung,
+  sendeFrist,
+  versandSchluessel,
   vornameAus,
   zufallsToken,
   zusammenfuehren,
@@ -39,7 +44,6 @@ function test(name, fn) {
 }
 
 const B = (j, m, t, h, min = 0) => berlinZeitpunkt(j, m, t, h, min);
-const H = 3600_000;
 const typen = (plan) => plan.map((j) => j.typ);
 const zeitVon = (plan, typ) => plan.find((j) => j.typ === typ)?.run_at;
 
@@ -142,6 +146,10 @@ test("normalisiereTelefon", () => {
   assert.equal(normalisiereTelefon("0049 151-23456789"), "+4915123456789");
   assert.equal(normalisiereTelefon("4915123456789"), "+4915123456789");
   assert.equal(normalisiereTelefon("+43 664 1234567"), "+436641234567");
+  assert.equal(normalisiereTelefon("15123456789"), "+4915123456789");
+  assert.equal(normalisiereTelefon("1701234567"), "+491701234567");
+  assert.equal(normalisiereTelefon("3012345678"), null);
+  assert.equal(normalisiereTelefon("123456789012"), null);
   assert.equal(normalisiereTelefon("12"), null);
   assert.equal(normalisiereTelefon(""), null);
   assert.equal(normalisiereTelefon(null), null);
@@ -195,6 +203,8 @@ test("Status nie zurückstufen", () => {
   assert.equal(darfStatusSetzen("zugestellt", "fehlgeschlagen"), false);
   assert.equal(darfStatusSetzen("gesendet", "fehlgeschlagen"), true);
   assert.equal(darfStatusSetzen("fehlgeschlagen", "gelesen"), false);
+  assert.equal(darfStatusSetzen("reserviert", "gesendet"), true);
+  assert.equal(darfStatusSetzen("reserviert", "fehlgeschlagen"), true);
 });
 test("zufallsToken: Länge, URL-sicher, eindeutig", () => {
   const set = new Set();
@@ -236,36 +246,107 @@ test("kein gemeinsames Merkmal → nicht derselbe", () =>
   assert.equal(istGleicherTermin({ ...close, telefon: null }, { ...calendly, telefon: "+491700000000" }), false));
 test("E-Mail ohne Groß-/Kleinschreibung", () =>
   assert.equal(istGleicherTermin({ ...close, telefon: null, email: "Markus@Example.de" }, { ...calendly, telefon: null }), true));
-test("Calendly überschreibt Close (Start, URI, opt_in, quelle)", () => {
-  const { patch, startGeaendert } = zusammenfuehren(close, calendly);
-  assert.equal(startGeaendert, true);
-  assert.equal(patch.start_at, calendly.start_at);
-  assert.equal(patch.calendly_event_uri, calendly.calendly_event_uri);
-  assert.equal(patch.email, "markus@example.de");
-  assert.equal(patch.quelle, "calendly");
-  assert.equal(patch.opt_in, true);
-  assert.equal("close_lead_id" in patch, false);
+test("Zwei Quellen, 15 Min. Abweichung: Calendly überschreibt, aber keine Verschiebung", () => {
+  const z = zusammenfuehren(close, calendly);
+  assert.equal(z.startGeaendert, true);
+  assert.equal(z.bestaetigungZuruecksetzen, false);
+  assert.equal(z.patch.start_at, calendly.start_at);
+  assert.equal(z.patch.calendly_event_uri, calendly.calendly_event_uri);
+  assert.equal(z.patch.email, "markus@example.de");
+  assert.equal(z.patch.quelle, "calendly");
+  assert.equal(z.patch.opt_in, true);
+  assert.equal(z.optInGewonnen, true);
+  assert.equal("close_lead_id" in z.patch, false);
+});
+test("Zwei Quellen, 25 Min. Abweichung → gilt als Verschiebung", () => {
+  const z = zusammenfuehren(close, { ...calendly, start_at: B(2026, 10, 15, 10, 25).toISOString() });
+  assert.equal(z.bestaetigungZuruecksetzen, true);
 });
 test("Close füllt bei Calendly-Termin nur Lücken, Start bleibt", () => {
-  const { patch, startGeaendert } = zusammenfuehren(
+  const z = zusammenfuehren(
     { ...calendly, close_lead_id: null },
     { ...close, start_at: B(2026, 10, 15, 10).toISOString(), close_protokoll_id: "acti_1" },
   );
-  assert.equal(startGeaendert, false);
-  assert.equal(patch.start_at, undefined);
-  assert.equal(patch.close_lead_id, "lead_1");
-  assert.equal(patch.close_protokoll_id, "acti_1");
-  assert.equal(patch.quelle, undefined);
-  assert.equal(patch.opt_in, undefined);
+  assert.equal(z.startGeaendert, false);
+  assert.equal(z.patch.start_at, undefined);
+  assert.equal(z.patch.close_lead_id, "lead_1");
+  assert.equal(z.patch.close_protokoll_id, "acti_1");
+  assert.equal(z.patch.quelle, undefined);
+  assert.equal(z.patch.opt_in, undefined, "andere Quelle ohne Einwilligung nimmt sie nicht weg");
 });
-test("Close-Termin neu gesetzt (verschoben) → startGeaendert", () => {
-  const { startGeaendert } = zusammenfuehren(close, { ...close, start_at: B(2026, 10, 15, 11).toISOString() });
-  assert.equal(startGeaendert, true);
+test("Gleiche Quelle: Verschiebung > 5 Min. setzt Bestätigung zurück, ≤ 5 Min. nicht", () => {
+  const weit = zusammenfuehren(close, { ...close, start_at: B(2026, 10, 15, 11).toISOString() }, true);
+  assert.equal(weit.startGeaendert, true);
+  assert.equal(weit.bestaetigungZuruecksetzen, true);
+  const nah = zusammenfuehren(close, { ...close, start_at: B(2026, 10, 15, 10, 5).toISOString() }, true);
+  assert.equal(nah.startGeaendert, true);
+  assert.equal(nah.bestaetigungZuruecksetzen, false);
+});
+test("Einwilligung hängt an der Nummer: Nummernwechsel übernimmt opt_in der neuen Quelle", () => {
+  const z = zusammenfuehren({ ...calendly, opt_in: true }, { ...calendly, telefon: "+4917000000000", opt_in: false });
+  assert.equal(z.patch.telefon, "+4917000000000");
+  assert.equal(z.patch.opt_in, false);
+  assert.equal(z.optInGewonnen, false);
+});
+test("Nummer nachgetragen (vorher leer) → opt_in der neuen Quelle", () => {
+  const z = zusammenfuehren({ ...close, telefon: null, opt_in: false }, { ...close, opt_in: true }, true);
+  assert.equal(z.patch.telefon, "+4915123456789");
+  assert.equal(z.optInGewonnen, true);
+});
+test("Gleiche Quelle, gleiche Nummer: Einwilligung zurückgenommen wird übernommen", () => {
+  const z = zusammenfuehren({ ...close, opt_in: true }, { ...close, opt_in: false }, true);
+  assert.equal(z.patch.opt_in, false);
 });
 test("identische Daten → leerer Patch", () => {
-  const { patch, startGeaendert } = zusammenfuehren(calendly, { ...calendly });
-  assert.deepEqual(patch, {});
-  assert.equal(startGeaendert, false);
+  const z = zusammenfuehren(calendly, { ...calendly });
+  assert.deepEqual(z.patch, {});
+  assert.equal(z.startGeaendert, false);
+});
+
+console.log("Versand-Regeln");
+test("versandSchluessel: gebucht je Nummer/Art/Tag, sonst Vorlage + Start", () => {
+  const start = B(2026, 10, 15, 10);
+  assert.equal(
+    versandSchluessel("+4915123456789", "hs_erstgespraech_gebucht", "gebucht", "erstgespraech", start),
+    "+4915123456789|erstgespraech|gebucht|2026-10-15",
+  );
+  assert.equal(
+    versandSchluessel("+4915123456789", "hs_erstgespraech_gebucht", "gebucht", "erstgespraech", B(2026, 10, 15, 10, 20)),
+    "+4915123456789|erstgespraech|gebucht|2026-10-15",
+    "leicht abweichender Start → derselbe Schlüssel",
+  );
+  assert.equal(
+    versandSchluessel("+4915123456789", "hs_strategie_erinnerung", "erinnerung", "strategie", start),
+    "+4915123456789|hs_strategie_erinnerung|2026-10-15T08:00",
+  );
+});
+test("gleichNochPassend: ±5 Min. um Start − Vorlauf", () => {
+  const start = B(2026, 10, 15, 10);
+  assert.equal(gleichNochPassend(start, "erstgespraech", B(2026, 10, 15, 9, 45)), true);
+  assert.equal(gleichNochPassend(start, "erstgespraech", B(2026, 10, 15, 9, 50)), true);
+  assert.equal(gleichNochPassend(start, "erstgespraech", B(2026, 10, 15, 9, 51)), false);
+  assert.equal(gleichNochPassend(start, "strategie", B(2026, 10, 15, 9, 3)), true);
+  assert.equal(gleichNochPassend(start, "strategie", B(2026, 10, 15, 8)), false, "Ruhezeit-Verschiebung → nicht mehr „in einer Stunde“");
+});
+test("sendeFrist: Termin = Start, abgesagt = max(Start, Absage + 12 h), verpasst = Start + 24 h", () => {
+  const start = B(2026, 10, 15, 10);
+  assert.equal(sendeFrist("erinnerung", start, null).getTime(), start.getTime());
+  assert.equal(sendeFrist("abgesagt", start, B(2026, 10, 12, 9)).getTime(), start.getTime());
+  assert.equal(sendeFrist("abgesagt", start, B(2026, 10, 15, 9)).toISOString(), B(2026, 10, 15, 21).toISOString());
+  assert.equal(sendeFrist("verpasst", start, null).toISOString(), B(2026, 10, 16, 10).toISOString());
+});
+test("hatUhrzeit: reines Datum → nein", () => {
+  assert.equal(hatUhrzeit("2026-10-16"), false);
+  assert.equal(hatUhrzeit("2026-10-16T10:30:00+02:00"), true);
+  assert.equal(hatUhrzeit("2026-10-16T08:30:00.000Z"), true);
+  assert.equal(hatUhrzeit(null), false);
+  assert.equal(hatUhrzeit("kaputt"), false);
+});
+test("istOhneInhalt: Reaktionen/System keine Aufgabe", () => {
+  assert.equal(istOhneInhalt("reaction"), true);
+  assert.equal(istOhneInhalt("unsupported"), true);
+  assert.equal(istOhneInhalt("text"), false);
+  assert.equal(istOhneInhalt("button"), false);
 });
 
 console.log("Vorlagen (Meta-Regeln)");

@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { closeApi } from "@/lib/integrations/close";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verarbeiteCloseProtokoll } from "@/lib/whatsapp/quellen";
@@ -369,7 +369,8 @@ export async function POST(request: Request) {
     }
 
     const ergebnis = await fuehreAus(protokoll, aktion);
-    await whatsappTerminbot(supabase, protokoll);
+    // WhatsApp-Terminbot entkoppelt: Close bekommt sofort Antwort, Bot läuft danach
+    after(() => whatsappTerminbot(supabase, protokoll));
     if (ergebnis.warnung) {
       await logFehler({ lead_id: protokoll.lead_id, activity_id: activityId }, String(ergebnis.warnung));
     }

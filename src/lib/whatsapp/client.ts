@@ -40,19 +40,41 @@ function graphBasis(): string {
   return `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || "v23.0"}`;
 }
 
+export const META_TIMEOUT_MS = 10_000;
+
+/**
+ * Fehler der Meta-API. eindeutig = Meta hat mit 4xx geantwortet → Nachricht ist sicher
+ * NICHT rausgegangen. Sonst (Timeout, Netzfehler, 5xx) ist unklar, ob sie gesendet wurde.
+ */
+export class MetaFehler extends Error {
+  eindeutig: boolean;
+  constructor(message: string, eindeutig: boolean) {
+    super(message);
+    this.name = "MetaFehler";
+    this.eindeutig = eindeutig;
+  }
+}
+
 async function graph<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const token = process.env.WHATSAPP_TOKEN;
-  if (!token) throw new Error("WHATSAPP_TOKEN fehlt");
-  const res = await fetch(`${graphBasis()}${path}`, {
-    method: init.method ?? "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
-    },
-    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
-    cache: "no-store",
-  });
-  const text = await res.text();
+  if (!token) throw new MetaFehler("WHATSAPP_TOKEN fehlt", true);
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${graphBasis()}${path}`, {
+      method: init.method ?? "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      },
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    });
+    text = await res.text();
+  } catch (err) {
+    throw new MetaFehler(`WhatsApp API nicht erreichbar/Zeitüberschreitung: ${err instanceof Error ? err.message : String(err)}`, false);
+  }
   let data: unknown = null;
   try {
     data = text ? JSON.parse(text) : null;
@@ -61,8 +83,9 @@ async function graph<T>(path: string, init: { method?: string; body?: unknown } 
   }
   if (!res.ok) {
     const e = (data as { error?: { message?: string; error_user_msg?: string; code?: number } } | null)?.error;
-    throw new Error(
+    throw new MetaFehler(
       `WhatsApp API Fehler ${res.status}${e?.code ? ` (${e.code})` : ""}: ${e?.error_user_msg || e?.message || text.slice(0, 300)}`,
+      res.status >= 400 && res.status < 500,
     );
   }
   return data as T;
@@ -74,13 +97,13 @@ async function graph<T>(path: string, init: { method?: string; body?: unknown } 
 
 async function sende(payload: Record<string, unknown>): Promise<string> {
   const id = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  if (!id) throw new Error("WHATSAPP_PHONE_NUMBER_ID fehlt");
+  if (!id) throw new MetaFehler("WHATSAPP_PHONE_NUMBER_ID fehlt", true);
   const data = await graph<{ messages?: Array<{ id: string }> }>(`/${id}/messages`, {
     method: "POST",
     body: { messaging_product: "whatsapp", recipient_type: "individual", ...payload },
   });
   const messageId = data?.messages?.[0]?.id;
-  if (!messageId) throw new Error("WhatsApp API: Antwort ohne Message-ID");
+  if (!messageId) throw new MetaFehler("WhatsApp API: Antwort ohne Message-ID", false);
   return messageId;
 }
 
@@ -115,15 +138,17 @@ export interface MetaVorlage {
 }
 
 /** Vorlage einreichen (echte Aktion — nur per Knopf im Dashboard). */
-export async function reicheVorlageEinMeta(definition: Record<string, unknown>): Promise<{ id: string; status: string }> {
+export async function reicheVorlageEinMeta(
+  definition: Record<string, unknown>,
+): Promise<{ id: string; status: string; category: string | null }> {
   const waba = process.env.WHATSAPP_WABA_ID;
   if (!waba) throw new Error("WHATSAPP_WABA_ID fehlt");
-  const data = await graph<{ id?: string; status?: string }>(`/${waba}/message_templates`, {
+  const data = await graph<{ id?: string; status?: string; category?: string }>(`/${waba}/message_templates`, {
     method: "POST",
     body: definition,
   });
   if (!data?.id) throw new Error("Meta hat keine Vorlagen-ID geliefert");
-  return { id: data.id, status: data.status ?? "PENDING" };
+  return { id: data.id, status: data.status ?? "PENDING", category: data.category ?? null };
 }
 
 /** Alle Vorlagen des Kontos (nur lesen). */

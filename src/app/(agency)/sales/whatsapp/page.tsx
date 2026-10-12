@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { adminPinGesetzt, istFreigeschaltet } from "@/lib/whatsapp/admin";
+import { adminPinZustand, istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { terminBasisUrl, waVerbindung, WA_ENV_PFLICHT, WA_ENV_WEITERE } from "@/lib/whatsapp/client";
 import { ladeEinstellungen } from "@/lib/whatsapp/einstellungen";
 import { formatDatum, formatUhrzeit } from "@/lib/whatsapp/logik";
@@ -30,6 +30,7 @@ export const dynamic = "force-dynamic";
 interface VorlageStatus {
   name: string;
   status: string | null;
+  kategorie: string | null;
   ablehnungsgrund: string | null;
   geprueft_am: string | null;
 }
@@ -118,7 +119,7 @@ export default async function WhatsappBotPage({
 
   const [einstellungen, vorlagenRes, termineRes, nachrichtenRes] = await Promise.all([
     ladeEinstellungen(svc).catch(() => null),
-    svc.from("wa_vorlagen").select("name, status, ablehnungsgrund, geprueft_am"),
+    svc.from("wa_vorlagen").select("name, status, kategorie, ablehnungsgrund, geprueft_am"),
     svc
       .from("wa_termine")
       .select("*")
@@ -214,8 +215,10 @@ export default async function WhatsappBotPage({
           titel="Freischaltung"
           beschreibung="Schalter, Einreichen und Kontaktdaten sind mit der Admin-PIN geschützt."
         >
-          {!adminPinGesetzt() ? (
+          {adminPinZustand() === "fehlt" ? (
             <p className="text-sm text-destructive">WHATSAPP_ADMIN_PIN ist nicht gesetzt — Änderungen sind gesperrt.</p>
+          ) : adminPinZustand() === "zu_kurz" ? (
+            <p className="text-sm text-destructive">PIN zu kurz – bitte in Vercel ändern (mind. 10 Zeichen).</p>
           ) : frei ? (
             <form action={sperrenAktion} className="flex items-center gap-3">
               <span className="inline-flex items-center gap-2 text-sm text-success">
@@ -314,6 +317,11 @@ export default async function WhatsappBotPage({
                   {an ? "Eingeschaltet" : "Ausgeschaltet"}
                   {s?.geprueft_am && <> · geprüft {zeit(s.geprueft_am)}</>}
                 </p>
+                {s?.kategorie && s.kategorie !== "UTILITY" && (
+                  <p className="mt-1 text-xs font-medium text-destructive">
+                    Von Meta auf {s.kategorie === "MARKETING" ? "Marketing" : s.kategorie} umgestuft — wird nicht gesendet
+                  </p>
+                )}
                 {s?.ablehnungsgrund && <p className="mt-1 text-xs text-destructive">Abgelehnt: {s.ablehnungsgrund}</p>}
                 {probleme.length > 0 && <p className="mt-1 text-xs text-destructive">{probleme.join(" · ")}</p>}
                 <details className="mt-2 text-sm">

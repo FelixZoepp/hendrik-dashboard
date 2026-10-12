@@ -99,6 +99,8 @@ export async function closeApi<T>(
     params?: Record<string, string>;
     method?: string;
     body?: unknown;
+    /** Optionaler Abbruch (z. B. AbortSignal.timeout) — gilt für alle Wiederholungen zusammen */
+    signal?: AbortSignal;
   },
 ): Promise<T> {
   const method = options?.method ?? "GET";
@@ -116,7 +118,7 @@ export async function closeApi<T>(
     Accept: "application/json",
   };
 
-  const fetchOptions: RequestInit = { method, headers };
+  const fetchOptions: RequestInit = { method, headers, signal: options?.signal };
   if (options?.body !== undefined) {
     fetchOptions.body = JSON.stringify(options.body);
   }
