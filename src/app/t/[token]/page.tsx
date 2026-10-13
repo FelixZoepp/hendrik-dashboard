@@ -88,7 +88,7 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
   return (
     <div className="space-y-4">
       <div className="fern-card p-6">
-        <h1 className="text-2xl font-semibold leading-tight tracking-tight">Ihr Termin mit Hoffmann Solutions</h1>
+        <h1 className="text-2xl font-semibold leading-tight tracking-tight">Ihr Termin mit der Hoffmann Solutions GmbH</h1>
         <p className="mt-1 text-[15px] text-muted-foreground">
           {termin.art === "strategie" ? "Strategiegespräch" : "Kostenfreies Erstgespräch"}
         </p>

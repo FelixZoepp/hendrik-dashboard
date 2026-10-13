@@ -44,8 +44,8 @@ export interface VorlageDef {
   buttons: VorlagenButton[];
 }
 
-const FOOTER_STOP = "Hoffmann Solutions · Abmelden mit STOP";
-const FOOTER = "Hoffmann Solutions";
+const FOOTER_STOP = "Hoffmann Solutions GmbH · Abmelden mit STOP";
+const FOOTER = "Hoffmann Solutions GmbH";
 
 /** Fester Berater im Strategiegespräch (steht direkt im Vorlagentext). */
 export const STRATEGIE_BERATER = "Hendrik Hoffmann";
@@ -67,7 +67,7 @@ export const VORLAGEN: VorlageDef[] = [
     sprache: "de",
     header: "Ihr Erstgespräch ist eingetragen",
     body:
-      "Guten Tag {{1}}, Ihr kostenfreies Erstgespräch mit Hoffmann Solutions ist eingetragen.\n\n" +
+      "Guten Tag {{1}}, Ihr kostenfreies Erstgespräch mit der Hoffmann Solutions GmbH ist eingetragen.\n\n" +
       "📅 {{2}} um {{3}} Uhr\n" +
       "📞 Telefonat – wir rufen Sie an\n\n" +
       "Bitte bestätigen Sie kurz über den Knopf, dass der Termin für Sie passt. Auf der Termin-Seite finden Sie " +
@@ -84,8 +84,9 @@ export const VORLAGEN: VorlageDef[] = [
     kategorie: "UTILITY",
     sprache: "de",
     body:
-      "Guten Tag {{1}}, eine kurze Erinnerung an Ihr Erstgespräch mit Hoffmann Solutions {{2}} um {{3}} Uhr.\n\n" +
-      "Passt der Termin weiterhin? Bitte geben Sie uns kurz Bescheid.",
+      "Guten Tag {{1}}, eine kurze Erinnerung an Ihr Erstgespräch mit der Hoffmann Solutions GmbH {{2}} um {{3}} Uhr.\n\n" +
+      "Sollte sich an Ihrer Verfügbarkeit etwas geändert haben, geben Sie uns bitte kurz Bescheid. " +
+      "In diesem Fall können Sie sich einfach einen neuen passenden Termin buchen.",
     footer: FOOTER_STOP,
     werte: ["name", "tag", "uhrzeit"],
     beispiele: ["Markus Müller", "morgen", "10:30"],
@@ -98,7 +99,7 @@ export const VORLAGEN: VorlageDef[] = [
     kategorie: "UTILITY",
     sprache: "de",
     body:
-      "Guten Tag {{1}}, in 15 Minuten um {{2}} Uhr rufen wir Sie für Ihr Erstgespräch mit Hoffmann Solutions an. " +
+      "Guten Tag {{1}}, in 15 Minuten um {{2}} Uhr rufen wir Sie für Ihr Erstgespräch mit der Hoffmann Solutions GmbH an. " +
       "Bitte halten Sie Ihr Telefon bereit.",
     footer: FOOTER,
     werte: ["name", "uhrzeit"],
@@ -131,7 +132,8 @@ export const VORLAGEN: VorlageDef[] = [
     sprache: "de",
     body:
       `Guten Tag {{1}}, eine kurze Erinnerung an Ihr Strategiegespräch mit ${STRATEGIE_BERATER} {{2}} um {{3}} Uhr.\n\n` +
-      "Passt der Termin weiterhin? Bitte geben Sie uns kurz Bescheid.",
+      "Sollte sich an Ihrer Verfügbarkeit etwas geändert haben, geben Sie uns bitte kurz Bescheid. " +
+      "In diesem Fall können Sie sich einfach einen neuen passenden Termin buchen.",
     footer: FOOTER_STOP,
     werte: ["name", "tag", "uhrzeit"],
     beispiele: ["Markus Müller", "morgen", "10:30"],
@@ -172,7 +174,7 @@ export const VORLAGEN: VorlageDef[] = [
     kategorie: "UTILITY",
     sprache: "de",
     body:
-      "Guten Tag {{1}}, Ihr Termin mit Hoffmann Solutions am {{2}} um {{3}} Uhr wurde abgesagt. " +
+      "Guten Tag {{1}}, Ihr Termin mit der Hoffmann Solutions GmbH am {{2}} um {{3}} Uhr wurde abgesagt. " +
       "Falls Sie einen neuen Termin wünschen, können Sie ihn über den Knopf auswählen.",
     footer: FOOTER_STOP,
     werte: ["name", "datum", "uhrzeit"],

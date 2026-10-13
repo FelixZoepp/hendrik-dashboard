@@ -21,8 +21,8 @@ const DAUER_MIN: Record<TerminArt, number> = { erstgespraech: 15, strategie: 60 
 
 export function terminTitel(art: TerminArt): string {
   return art === "strategie"
-    ? `Strategiegespräch mit ${STRATEGIE_BERATER} (Hoffmann Solutions)`
-    : "Erstgespräch mit Hoffmann Solutions";
+    ? `Strategiegespräch mit ${STRATEGIE_BERATER} (Hoffmann Solutions GmbH)`
+    : "Erstgespräch mit der Hoffmann Solutions GmbH";
 }
 
 export function terminOrt(t: Pick<KalenderTermin, "art" | "ort_text" | "join_url">): string {
@@ -37,8 +37,8 @@ function ende(t: KalenderTermin): string {
 function beschreibung(t: KalenderTermin): string {
   const teile = [
     t.art === "strategie"
-      ? `Strategiegespräch mit ${STRATEGIE_BERATER} von Hoffmann Solutions.`
-      : "Kostenfreies Erstgespräch mit Hoffmann Solutions. Wir rufen Sie zum Termin an.",
+      ? `Strategiegespräch mit ${STRATEGIE_BERATER} von der Hoffmann Solutions GmbH.`
+      : "Kostenfreies Erstgespräch mit der Hoffmann Solutions GmbH. Wir rufen Sie zum Termin an.",
   ];
   if (t.join_url) teile.push(`Zum Gespräch: ${t.join_url}`);
   teile.push(`Termindetails: ${t.seitenUrl}`);
