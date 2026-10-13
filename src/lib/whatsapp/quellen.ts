@@ -60,26 +60,24 @@ export interface CalendlyWebhook {
 }
 
 const TELEFON_FRAGE = /whatsapp|handy|telefon|mobil/i;
-/** Nur eine Nummer aus der WhatsApp-Frage gilt als Einwilligung („Handynummer für die Terminbestätigung per WhatsApp“). */
 const WHATSAPP_FRAGE = /whatsapp/i;
 
 /**
- * Telefonnummer und Einwilligung aus einer Calendly-Buchung.
- * opt_in nur, wenn die Nummer aus einer Frage mit „WhatsApp“ im Text stammt. SMS-Erinnerungsfeld,
- * andere Telefon-Fragen und der „Wir rufen an“-Ort liefern die Nummer nur für Close/Zuordnung.
+ * Telefonnummer und Einwilligung aus einer Calendly-Buchung (Erst- oder Strategiegespräch).
+ * Entscheidung Felix (13.10.): Wer beim Buchen eine Nummer angibt (Handynummer-Frage, „Wir rufen an“-Ort
+ * oder SMS-Erinnerung), bekommt Bestätigung und Erinnerungen per WhatsApp → opt_in.
+ * Reihenfolge: WhatsApp-Frage, andere Telefon-Frage, Anruf-Ort, SMS-Erinnerungsnummer.
  */
 export function telefonAusCalendly(p: NonNullable<CalendlyWebhook["payload"]>): { telefon: string | null; optIn: boolean } {
-  const wa = p.questions_and_answers?.find((qa) => WHATSAPP_FRAGE.test(qa.question));
-  const waNummer = normalisiereTelefon(wa?.answer);
-  if (waNummer) return { telefon: waNummer, optIn: true };
   const kandidaten = [
-    p.text_reminder_number,
+    p.questions_and_answers?.find((qa) => WHATSAPP_FRAGE.test(qa.question))?.answer,
     p.questions_and_answers?.find((qa) => TELEFON_FRAGE.test(qa.question))?.answer,
     p.scheduled_event?.location?.type === "outbound_call" ? p.scheduled_event.location.location : null,
+    p.text_reminder_number,
   ];
   for (const k of kandidaten) {
     const t = normalisiereTelefon(k);
-    if (t) return { telefon: t, optIn: false };
+    if (t) return { telefon: t, optIn: true };
   }
   return { telefon: null, optIn: false };
 }
@@ -163,7 +161,7 @@ export async function verarbeiteCalendly(
     firma: p.questions_and_answers?.find((qa) => /unternehmen|firma/i.test(qa.question))?.answer?.trim() || null,
     telefon,
     email,
-    // Einwilligung nur über die WhatsApp-Frage
+    // Einwilligung: Nummer beim Buchen angegeben
     opt_in: optIn,
   };
   const r = await legeTerminAn(svc, eingabe, jetzt);
