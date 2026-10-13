@@ -176,7 +176,7 @@ export async function bestaetigeTermin(
   return { gesendet: r.gesendet, ...(r.gesendet ? {} : { grund: r.grund }) };
 }
 
-/** Verschiebewunsch: Antwort (Link oder „wir melden uns“) + Close-Aufgabe für heute. */
+/** Verschiebewunsch: nur Close-Aufgabe für heute + Notiz, keine Antwort an den Lead. */
 export async function verschiebeWunsch(
   svc: SupabaseClient,
   termin: Termin,
@@ -198,10 +198,6 @@ export async function verschiebeWunsch(
     `Lead möchte ${artLabel(termin)} am ${wann(termin)} verschieben (${opts.quelle === "seite" ? "Termin-Seite" : "WhatsApp"})`,
   );
 
-  if (opts.quelle !== "whatsapp" || !termin.telefon) return { aufgabe };
-  const text = termin.reschedule_url
-    ? FREITEXTE.verschiebenMitLink(termin.reschedule_url)
-    : FREITEXTE.verschiebenOhneLink;
-  const r = await sendeFreitext(svc, { telefon: termin.telefon, text, termin });
-  return { aufgabe, gesendet: r.gesendet };
+  // Bewusst keine Antwort und kein Umbuch-Link (Entscheidung Felix 13.10.) — das Team meldet sich über die Aufgabe.
+  return { aufgabe };
 }

@@ -189,8 +189,6 @@ export const FREITEXTE = {
   bestaetigt: "Vielen Dank, Ihr Termin ist bestätigt ✅",
   bestaetigtMitVideo:
     "Vielen Dank, Ihr Termin ist bestätigt ✅ Vorab ein kurzes Video, damit Sie wissen, was Sie erwartet.",
-  verschiebenMitLink: (link: string) => `Kein Problem. Hier können Sie einen neuen Termin auswählen: ${link}`,
-  verschiebenOhneLink: "Kein Problem, wir melden uns heute noch bei Ihnen.",
   stop: "Alles klar, Sie erhalten von uns keine Nachrichten mehr.",
 };
 
