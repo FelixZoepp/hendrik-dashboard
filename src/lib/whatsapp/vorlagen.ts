@@ -70,12 +70,12 @@ export const VORLAGEN: VorlageDef[] = [
       "Guten Tag {{1}}, Ihr kostenfreies Erstgespräch mit Hoffmann Solutions ist eingetragen.\n\n" +
       "📅 {{2}} um {{3}} Uhr\n" +
       "📞 Telefonat – wir rufen Sie an\n\n" +
-      "Bitte bestätigen Sie kurz über den Knopf, dass der Termin für Sie passt. " +
-      "Über „Termin & Kalender“ tragen Sie ihn mit einem Klick in Ihren Kalender ein.",
+      "Bitte bestätigen Sie kurz über den Knopf, dass der Termin für Sie passt. Auf der Termin-Seite finden Sie " +
+      "ein kurzes Video zum Ablauf und können den Termin in Ihren Kalender eintragen.",
     footer: FOOTER_STOP,
     werte: ["name", "datum", "uhrzeit"],
     beispiele: ["Markus Müller", "Donnerstag, 16.10.", "10:30"],
-    buttons: BUTTONS_BESTAETIGEN("Termin & Kalender"),
+    buttons: BUTTONS_BESTAETIGEN("Termin, Video & Kalender"),
   },
   {
     name: "hs_erstgespraech_erinnerung",
@@ -89,7 +89,7 @@ export const VORLAGEN: VorlageDef[] = [
     footer: FOOTER_STOP,
     werte: ["name", "tag", "uhrzeit"],
     beispiele: ["Markus Müller", "morgen", "10:30"],
-    buttons: BUTTONS_BESTAETIGEN("Termin & Kalender"),
+    buttons: BUTTONS_BESTAETIGEN("Termin, Video & Kalender"),
   },
   {
     name: "hs_erstgespraech_gleich",

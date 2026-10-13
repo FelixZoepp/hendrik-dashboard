@@ -364,6 +364,40 @@ export async function sendeVideo(
 }
 
 /** Video-Link, den WhatsApp direkt als Video abspielen kann (mp4/3gp). */
+/** YouTube-, Vimeo- oder Loom-Link → einbettbare Player-URL (sonst null). */
+export function videoEinbettung(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const host = u.hostname.replace(/^(www|m)\./, "");
+  const id = (s: string | null | undefined) => (s && /^[\w-]{6,}$/.test(s) ? s : null);
+  if (host === "youtu.be") {
+    const v = id(u.pathname.split("/")[1]);
+    return v ? `https://www.youtube-nocookie.com/embed/${v}?rel=0` : null;
+  }
+  if (host === "youtube.com" || host === "youtube-nocookie.com") {
+    const teile = u.pathname.split("/").filter(Boolean);
+    const v = id(u.searchParams.get("v")) ?? (["shorts", "embed", "live"].includes(teile[0]) ? id(teile[1]) : null);
+    return v ? `https://www.youtube-nocookie.com/embed/${v}?rel=0` : null;
+  }
+  if (host === "vimeo.com" || host === "player.vimeo.com") {
+    const teile = u.pathname.split("/").filter(Boolean);
+    const v = teile.find((t) => /^\d+$/.test(t));
+    const hash = teile[teile.indexOf(v ?? "") + 1];
+    if (!v) return null;
+    return `https://player.vimeo.com/video/${v}${hash && /^[a-f0-9]+$/i.test(hash) ? `?h=${hash}` : ""}`;
+  }
+  if (host === "loom.com") {
+    const teile = u.pathname.split("/").filter(Boolean);
+    const v = ["share", "embed"].includes(teile[0]) ? id(teile[1]) : null;
+    return v ? `https://www.loom.com/embed/${v}` : null;
+  }
+  return null;
+}
+
 export function istDirektesVideo(url: string): boolean {
   try {
     return /\.(mp4|3gpp?)$/i.test(new URL(url).pathname);

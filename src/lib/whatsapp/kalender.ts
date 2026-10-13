@@ -1,6 +1,6 @@
 /**
- * „In den Kalender eintragen“ für die Termin-Seite: Google-/Outlook-Link und ICS
- * (Apple & alle anderen) mit Erinnerung. Rein, ohne I/O.
+ * „In den Kalender eintragen“ für die Termin-Seite: Google, Outlook (privat + Microsoft 365), Yahoo
+ * und ICS (Apple, Samsung, GMX/Web.de, Thunderbird & alle anderen) mit Erinnerung. Rein, ohne I/O.
  */
 
 import { ORT_FALLBACK_STRATEGIE, STRATEGIE_BERATER } from "./vorlagen";
@@ -60,8 +60,8 @@ export function googleLink(t: KalenderTermin): string {
   return `https://calendar.google.com/calendar/render?${q.toString()}`;
 }
 
-export function outlookLink(t: KalenderTermin): string {
-  const q = new URLSearchParams({
+function outlookParameter(t: KalenderTermin): URLSearchParams {
+  return new URLSearchParams({
     path: "/calendar/action/compose",
     rru: "addevent",
     subject: terminTitel(t.art),
@@ -70,7 +70,28 @@ export function outlookLink(t: KalenderTermin): string {
     body: beschreibung(t),
     location: t.join_url ?? terminOrt(t),
   });
-  return `https://outlook.live.com/calendar/0/deeplink/compose?${q.toString()}`;
+}
+
+/** Outlook privat (outlook.com, Hotmail, Live) */
+export function outlookLink(t: KalenderTermin): string {
+  return `https://outlook.live.com/calendar/0/deeplink/compose?${outlookParameter(t).toString()}`;
+}
+
+/** Outlook geschäftlich (Microsoft 365 / Office 365) */
+export function office365Link(t: KalenderTermin): string {
+  return `https://outlook.office.com/calendar/0/deeplink/compose?${outlookParameter(t).toString()}`;
+}
+
+export function yahooLink(t: KalenderTermin): string {
+  const q = new URLSearchParams({
+    v: "60",
+    title: terminTitel(t.art),
+    st: utc(t.start_at),
+    et: utc(ende(t)),
+    desc: beschreibung(t),
+    in_loc: t.join_url ?? terminOrt(t),
+  });
+  return `https://calendar.yahoo.com/?${q.toString()}`;
 }
 
 /** ICS-Text escapen (RFC 5545) */

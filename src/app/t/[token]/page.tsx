@@ -2,8 +2,8 @@ import { CalendarPlus, CheckCircle2, Clock, MapPin, PlayCircle, Video } from "lu
 import { createAdminClient } from "@/lib/supabase/admin";
 import { terminBasisUrl } from "@/lib/whatsapp/client";
 import { ladeEinstellungen } from "@/lib/whatsapp/einstellungen";
-import { istDirektesVideo } from "@/lib/whatsapp/gate";
-import { googleLink, outlookLink } from "@/lib/whatsapp/kalender";
+import { istDirektesVideo, videoEinbettung } from "@/lib/whatsapp/gate";
+import { googleLink, office365Link, outlookLink, yahooLink } from "@/lib/whatsapp/kalender";
 import { formatUhrzeit, TZ } from "@/lib/whatsapp/logik";
 import { ladeTerminPerToken, type Termin } from "@/lib/whatsapp/termine";
 import { bestaetigenAktion, verschiebenAktion } from "./actions";
@@ -153,6 +153,17 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
           </p>
           {istDirektesVideo(video) ? (
             <video src={video} controls playsInline preload="metadata" className="mt-3 w-full rounded-2xl bg-black" />
+          ) : videoEinbettung(video) ? (
+            <div className="mt-3 aspect-video w-full overflow-hidden rounded-2xl bg-black">
+              <iframe
+                src={videoEinbettung(video)!}
+                title="So läuft das Gespräch ab"
+                className="size-full"
+                allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                allowFullScreen
+                loading="lazy"
+              />
+            </div>
           ) : (
             <a href={video} target="_blank" rel="noopener noreferrer" className={`${KNOPF_SEKUNDAER} mt-3`}>
               Video ansehen
@@ -170,12 +181,24 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
             Google Kalender
           </a>
           <a href={`/t/${termin.token}/ics`} className={KNOPF_SEKUNDAER}>
-            iPhone / Apple Kalender
+            iPhone / Mac (Apple Kalender)
           </a>
           <a href={outlookLink(kalender)} target="_blank" rel="noopener noreferrer" className={KNOPF_SEKUNDAER}>
-            Outlook
+            Outlook.com / Hotmail
+          </a>
+          <a href={office365Link(kalender)} target="_blank" rel="noopener noreferrer" className={KNOPF_SEKUNDAER}>
+            Outlook geschäftlich (Microsoft 365)
+          </a>
+          <a href={yahooLink(kalender)} target="_blank" rel="noopener noreferrer" className={KNOPF_SEKUNDAER}>
+            Yahoo Kalender
+          </a>
+          <a href={`/t/${termin.token}/ics`} className={KNOPF_SEKUNDAER}>
+            Anderer Kalender (.ics-Datei)
           </a>
         </div>
+        <p className="mt-2 text-center text-[13px] text-muted-foreground">
+          Die .ics-Datei funktioniert mit jedem Kalender, z. B. Outlook am PC, Samsung, GMX, Web.de oder Thunderbird.
+        </p>
         <p className="mt-3 text-center text-[13px] text-muted-foreground">
           Mit Erinnerung {termin.art === "strategie" ? "eine Stunde" : "15 Minuten"} vorher.
         </p>

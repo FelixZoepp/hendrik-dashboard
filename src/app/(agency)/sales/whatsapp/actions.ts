@@ -7,6 +7,7 @@ import { istFreigeschaltet, schalteFrei, sperre } from "@/lib/whatsapp/admin";
 import { waVerbindung } from "@/lib/whatsapp/client";
 import { ladeEinstellungen, speichereEinstellung } from "@/lib/whatsapp/einstellungen";
 import { normalisiereTelefon } from "@/lib/whatsapp/logik";
+import { legeCloseFeldAn, richteCalendlyWebhookEin } from "@/lib/whatsapp/einrichtung";
 import { gleicheVorlagenAb, reicheVorlageEin } from "@/lib/whatsapp/verwaltung";
 import { VORLAGEN_NAMEN } from "@/lib/whatsapp/vorlagen";
 
@@ -108,4 +109,26 @@ export async function einstellungenAktion(formData: FormData) {
   const feld = String(formData.get("close_optin_feld") ?? "").trim();
   await speichereEinstellung(svc, "close_optin_feld", feld || null);
   zurueck("Einstellungen gespeichert.");
+}
+
+export async function closeFeldAktion() {
+  await nurFreigeschaltet();
+  let r: { feld: string; neu: boolean };
+  try {
+    r = await legeCloseFeldAn(createAdminClient());
+  } catch (err) {
+    zurueck(`Close-Feld fehlgeschlagen: ${fehlerText(err)}`, true);
+  }
+  zurueck(`Close-Feld „WhatsApp-Bestätigung ok“ ${r.neu ? "angelegt" : "gefunden"} und verknüpft (${r.feld}).`);
+}
+
+export async function calendlyWebhookAktion() {
+  await nurFreigeschaltet();
+  let r: { url: string; neu: boolean; scope: string };
+  try {
+    r = await richteCalendlyWebhookEin();
+  } catch (err) {
+    zurueck(`Calendly-Webhook fehlgeschlagen: ${fehlerText(err)}`, true);
+  }
+  zurueck(`Calendly-Webhook ${r.neu ? "angelegt" : "war schon da"} (${r.scope}) → ${r.url}`);
 }

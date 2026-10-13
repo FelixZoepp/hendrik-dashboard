@@ -22,6 +22,8 @@ import {
   sperrenAktion,
   testnummernAktion,
   vorlageSchalterAktion,
+  calendlyWebhookAktion,
+  closeFeldAktion,
 } from "./actions";
 
 export const metadata: Metadata = { title: "WhatsApp-Bot" };
@@ -374,6 +376,24 @@ export default async function WhatsappBotPage({
             </Button>
           </div>
         </form>
+      </Abschnitt>
+
+      <Abschnitt
+        titel="Einrichtung"
+        beschreibung="Einmalig: Einwilligungsfeld in Close anlegen und Calendly-Buchungen an den Bot melden. Mehrfaches Klicken schadet nicht."
+      >
+        <div className="flex flex-wrap gap-2">
+          <form action={closeFeldAktion}>
+            <Button type="submit" size="sm" variant="outline" disabled={gesperrt}>
+              Close-Feld anlegen
+            </Button>
+          </form>
+          <form action={calendlyWebhookAktion}>
+            <Button type="submit" size="sm" variant="outline" disabled={gesperrt}>
+              Calendly-Webhook einrichten
+            </Button>
+          </form>
+        </div>
       </Abschnitt>
 
       <Abschnitt titel="Kommende Termine" beschreibung="Ab 2 Stunden zurück, max. 50">
