@@ -6,7 +6,7 @@ import { istDirektesVideo, videoEinbettung } from "@/lib/whatsapp/gate";
 import { googleLink, office365Link, outlookLink, yahooLink } from "@/lib/whatsapp/kalender";
 import { formatUhrzeit, TZ } from "@/lib/whatsapp/logik";
 import { ladeTerminPerToken, type Termin } from "@/lib/whatsapp/termine";
-import { bestaetigenAktion, verschiebenAktion } from "./actions";
+import { bestaetigenAktion } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -83,7 +83,6 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
     seitenUrl: `${terminBasisUrl()}/t/${termin.token}`,
   };
   const bestaetigen = bestaetigenAktion.bind(null, termin.token);
-  const verschieben = verschiebenAktion.bind(null, termin.token);
 
   return (
     <div className="space-y-4">
@@ -128,21 +127,6 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
             </form>
           )}
 
-          {termin.reschedule_url ? (
-            <a href={termin.reschedule_url} target="_blank" rel="noopener noreferrer" className={KNOPF_SEKUNDAER}>
-              Termin verschieben
-            </a>
-          ) : termin.verschieben_am || ok === "verschieben" ? (
-            <p className="rounded-2xl bg-accent px-4 py-3 text-center text-[14px] text-accent-foreground">
-              Kein Problem – wir melden uns heute noch bei Ihnen, um einen neuen Termin zu finden.
-            </p>
-          ) : (
-            <form action={verschieben}>
-              <button type="submit" className={KNOPF_SEKUNDAER}>
-                Termin verschieben
-              </button>
-            </form>
-          )}
         </div>
       </div>
 

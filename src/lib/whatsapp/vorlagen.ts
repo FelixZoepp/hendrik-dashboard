@@ -54,7 +54,6 @@ export const ORT_FALLBACK_STRATEGIE = "Videocall – Link folgt per WhatsApp";
 
 const BUTTONS_BESTAETIGEN = (urlText: string): VorlagenButton[] => [
   { typ: "QUICK_REPLY", text: "Ich bin dabei", aktion: "bestaetigen" },
-  { typ: "QUICK_REPLY", text: "Termin verschieben", aktion: "verschieben" },
   { typ: "URL", text: urlText, pfad: "t" },
 ];
 

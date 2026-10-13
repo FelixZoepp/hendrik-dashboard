@@ -454,8 +454,8 @@ test("metaDefinition: Header, Footer, URL-Button mit Beispiel", () => {
   const d = metaDefinition(VORLAGEN[0], "https://cloud.hoffmannsolutions.de/");
   assert.equal(d.components[0].type, "HEADER");
   const buttons = d.components.find((c) => c.type === "BUTTONS").buttons;
-  assert.equal(buttons[2].url, "https://cloud.hoffmannsolutions.de/t/{{1}}");
-  assert.match(buttons[2].example[0], /^https:\/\/cloud\.hoffmannsolutions\.de\/t\/\w+$/);
+  assert.equal(buttons[1].url, "https://cloud.hoffmannsolutions.de/t/{{1}}");
+  assert.match(buttons[1].example[0], /^https:\/\/cloud\.hoffmannsolutions\.de\/t\/\w+$/);
 });
 test("renderBody setzt Werte ein", () => {
   const text = renderBody(VORLAGEN[0], ["Markus Müller", "Donnerstag, 16.10.", "10:30"]);
