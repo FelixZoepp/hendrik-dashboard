@@ -112,7 +112,7 @@ async function speichereVorlagenEreignisse(body: WaWebhook) {
     for (const change of entry.changes ?? []) {
       const value = change.value ?? {};
 
-      if (change.field === "message_template_category_update" && value.message_template_name && value.new_category) {
+      if ((change.field === "template_category_update" || change.field === "message_template_category_update") && value.message_template_name && value.new_category) {
         const { error } = await svc
           .from("wa_vorlagen")
           .update({ kategorie: value.new_category.toUpperCase(), geprueft_am: new Date().toISOString() })
