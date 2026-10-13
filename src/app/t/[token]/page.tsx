@@ -105,7 +105,7 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
           </p>
           <p className="flex items-start gap-2.5">
             <MapPin className="mt-0.5 size-4 flex-none text-primary" />
-            <span>{termin.art === "erstgespraech" ? "Telefonat – wir rufen Sie an" : "Videocall"}</span>
+            <span>{termin.art === "erstgespraech" ? "Telefonat – ein Handwerksberater aus unserem Team ruft Sie an" : "Videocall"}</span>
           </p>
         </div>
 

@@ -26,7 +26,7 @@ export function terminTitel(art: TerminArt): string {
 }
 
 export function terminOrt(t: Pick<KalenderTermin, "art" | "ort_text" | "join_url">): string {
-  if (t.art === "erstgespraech") return "Telefonat – wir rufen Sie an";
+  if (t.art === "erstgespraech") return "Telefonat – ein Handwerksberater aus unserem Team ruft Sie an";
   return t.ort_text || (t.join_url ? "Videocall" : ORT_FALLBACK_STRATEGIE);
 }
 
@@ -38,7 +38,7 @@ function beschreibung(t: KalenderTermin): string {
   const teile = [
     t.art === "strategie"
       ? `Strategiegespräch mit ${STRATEGIE_BERATER} von der Hoffmann Solutions GmbH.`
-      : "Kostenfreies Erstgespräch mit der Hoffmann Solutions GmbH. Wir rufen Sie zum Termin an.",
+      : "Kostenfreies Erstgespräch mit der Hoffmann Solutions GmbH. Ein Handwerksberater aus unserem Team ruft Sie zum Termin an.",
   ];
   if (t.join_url) teile.push(`Zum Gespräch: ${t.join_url}`);
   teile.push(`Termindetails: ${t.seitenUrl}`);

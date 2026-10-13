@@ -69,7 +69,7 @@ export const VORLAGEN: VorlageDef[] = [
     body:
       "Guten Tag {{1}}, Ihr kostenfreies Erstgespräch mit der Hoffmann Solutions GmbH ist eingetragen.\n\n" +
       "📅 {{2}} um {{3}} Uhr\n" +
-      "📞 Telefonat – wir rufen Sie an\n\n" +
+      "📞 Telefonat – ein Handwerksberater aus unserem Team ruft Sie an\n\n" +
       "Bitte bestätigen Sie kurz über den Knopf, dass der Termin für Sie passt. Auf der Termin-Seite finden Sie " +
       "ein kurzes Video zum Ablauf und können den Termin in Ihren Kalender eintragen.",
     footer: FOOTER_STOP,
@@ -99,7 +99,7 @@ export const VORLAGEN: VorlageDef[] = [
     kategorie: "UTILITY",
     sprache: "de",
     body:
-      "Guten Tag {{1}}, in 15 Minuten um {{2}} Uhr rufen wir Sie für Ihr Erstgespräch mit der Hoffmann Solutions GmbH an. " +
+      "Guten Tag {{1}}, in 15 Minuten um {{2}} Uhr ruft Sie ein Handwerksberater aus unserem Team für Ihr Erstgespräch mit der Hoffmann Solutions GmbH an. " +
       "Bitte halten Sie Ihr Telefon bereit.",
     footer: FOOTER,
     werte: ["name", "uhrzeit"],
