@@ -197,6 +197,7 @@ export const AUFGABEN = {
   unbestaetigt: "Termin nicht bestätigt – kurz anrufen",
   verschieben: "Lead möchte Termin verschieben",
   beantworten: "WhatsApp beantworten",
+  nichtZugestellt: "WhatsApp nicht zugestellt – Nummer prüfen und anrufen",
 };
 
 export function vorlageFuer(art: "erstgespraech" | "strategie", typ: VorlageDef["typ"]): VorlageDef | undefined {

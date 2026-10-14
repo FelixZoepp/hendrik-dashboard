@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aufgabeAnLead, findeCloseLead, notizSicher, setzeCloseStatus } from "./close-log";
+import { leadName, meldeSlack, terminZeilen } from "./slack";
 import { CLOSE_STATUS_WERTE } from "./einrichtung";
 import { ladeEinstellungen } from "./einstellungen";
 import { istDirektesVideo, sendeFreitext, sendeVideo } from "./gate";
@@ -116,6 +117,13 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
     await sendeFreitext(svc, { telefon, text: FREITEXTE.stop, termin, closeLeadId, pflichtAntwort: true });
     await notizSicher(closeLeadId, "WhatsApp abgemeldet (STOP) – der Bot sendet keine Nachrichten mehr an diese Nummer.");
     await setzeCloseStatus(svc, closeLeadId, CLOSE_STATUS_WERTE.abgemeldet);
+    await meldeSlack({
+      emoji: "🚫",
+      titel: `${leadName(termin, telefon)} hat sich von WhatsApp abgemeldet`,
+      zeilen: ["Der Bot schickt dieser Nummer keine Nachrichten mehr."],
+      telefon,
+      closeLeadId,
+    });
     return { aktion: "stop" };
   }
 
@@ -132,6 +140,17 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
     datum: berlinDatum(jetzt),
     zustaendig: termin?.close_user_id ?? null,
   }).catch(() => null);
+  await meldeSlack({
+    emoji: "💬",
+    titel: `WhatsApp-Antwort von ${leadName(termin, telefon)}`,
+    zeilen: [
+      `> ${(e.text || `[${e.typ}]`).slice(0, 1500).replace(/\n/g, "\n> ")}`,
+      ...(termin ? terminZeilen(termin) : []),
+      aufgabe ? "📝 Aufgabe „WhatsApp beantworten“ in Close angelegt" : null,
+    ],
+    telefon,
+    closeLeadId,
+  });
   return { aktion: "aufgabe", aufgabe, closeLeadId };
 }
 
@@ -161,6 +180,13 @@ export async function bestaetigeTermin(
     `${artLabel(termin)} am ${wann(termin)} ${opts.quelle === "seite" ? "über die Termin-Seite" : "per WhatsApp"} bestätigt`,
   );
   await setzeCloseStatus(svc, termin.close_lead_id, CLOSE_STATUS_WERTE.bestaetigt);
+  await meldeSlack({
+    emoji: "✅",
+    titel: `${leadName(termin)} hat den Termin bestätigt`,
+    zeilen: [...terminZeilen(termin), opts.quelle === "seite" ? "über die Termin-Seite" : null],
+    telefon: termin.telefon,
+    closeLeadId: termin.close_lead_id,
+  });
 
   if (!termin.telefon) return { gesendet: false };
   const video = (await ladeEinstellungen(svc)).videos[termin.art];
@@ -201,6 +227,13 @@ export async function verschiebeWunsch(
     `Lead möchte ${artLabel(termin)} am ${wann(termin)} verschieben (${opts.quelle === "seite" ? "Termin-Seite" : "WhatsApp"})`,
   );
   await setzeCloseStatus(svc, termin.close_lead_id, CLOSE_STATUS_WERTE.verschieben);
+  await meldeSlack({
+    emoji: "🔁",
+    titel: `${leadName(termin)} möchte den Termin verschieben`,
+    zeilen: [...terminZeilen(termin), aufgabe ? "📝 Aufgabe in Close angelegt – bitte anrufen und neuen Termin legen" : null],
+    telefon: termin.telefon,
+    closeLeadId: termin.close_lead_id,
+  });
 
   // Bewusst keine Antwort und kein Umbuch-Link (Entscheidung Felix 13.10.) — das Team meldet sich über die Aufgabe.
   return { aufgabe };

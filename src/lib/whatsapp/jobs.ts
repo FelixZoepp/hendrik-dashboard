@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aufgabeAnLead, setzeCloseStatus } from "./close-log";
+import { leadName, meldeSlack, terminZeilen } from "./slack";
 import { CLOSE_STATUS_WERTE } from "./einrichtung";
 import { OhneWiederholung, sendeVorlage, VersandUnklar } from "./gate";
 import {
@@ -130,6 +131,13 @@ async function unbestaetigtCheck(svc: SupabaseClient, termin: Termin): Promise<J
   const id = await aufgabeAnLead(termin.close_lead_id, AUFGABEN.unbestaetigt, {
     datum: berlinDatum(new Date()),
     zustaendig: termin.close_user_id,
+  });
+  await meldeSlack({
+    emoji: "⚠️",
+    titel: `${leadName(termin)} hat den Termin noch nicht bestätigt`,
+    zeilen: [...terminZeilen(termin), "📝 Aufgabe „Termin nicht bestätigt – kurz anrufen“ in Close angelegt"],
+    telefon: termin.telefon,
+    closeLeadId: termin.close_lead_id,
   });
   return { status: "erledigt", ergebnis: id ? `Close-Aufgabe ${id}` : "Close-Aufgabe existiert bereits" };
 }

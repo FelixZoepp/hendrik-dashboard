@@ -3,6 +3,9 @@ import { ABGESCHLOSSEN, LEAD, OPP_TERMIN_AM_FELD, pipelineFuerBuchung, pipelineS
 import { closeApi, closeUserName, type CloseUser } from "@/lib/integrations/close";
 import { CLOSE_STATUS_WERTE, type CloseStatusWert } from "./einrichtung";
 import { ladeEinstellungen } from "./einstellungen";
+import { leadName, meldeSlack, terminZeilen } from "./slack";
+import type { Termin } from "./termine";
+import { AUFGABEN } from "./vorlagen";
 import { berlinDatum, firmenDomain, normalisiereTelefon, type TerminArt } from "./logik";
 
 const CLOSE_TIMEOUT_MS = 10_000;
@@ -313,16 +316,42 @@ export function istJa(wert: unknown): boolean {
  */
 export async function meldeNichtZugestellt(
   svc: SupabaseClient,
-  n: { closeLeadId: string | null; terminId: string | null; typ: string | null; vorlage: string | null; fehler: string },
+  n: {
+    closeLeadId: string | null;
+    terminId: string | null;
+    typ: string | null;
+    vorlage: string | null;
+    fehler: string;
+    telefon?: string | null;
+  },
 ): Promise<void> {
   try {
     await notizSicher(n.closeLeadId, `WhatsApp nicht zugestellt: ${n.vorlage ?? n.typ ?? "Nachricht"} – ${n.fehler}`);
-    if (!n.closeLeadId || n.typ !== "template") return;
+    if (n.typ !== "template") return;
+    let termin: Termin | null = null;
     if (n.terminId) {
-      const { data } = await svc.from("wa_termine").select("bestaetigt_am").eq("id", n.terminId).maybeSingle();
-      if ((data as { bestaetigt_am: string | null } | null)?.bestaetigt_am) return;
+      const { data } = await svc.from("wa_termine").select("*").eq("id", n.terminId).maybeSingle();
+      termin = (data as Termin | null) ?? null;
+      if (termin?.bestaetigt_am || termin?.status === "abgesagt") return;
     }
-    await setzeCloseStatus(svc, n.closeLeadId, CLOSE_STATUS_WERTE.nichtZugestellt);
+    const aufgabe = n.closeLeadId
+      ? await aufgabeAnLead(n.closeLeadId, AUFGABEN.nichtZugestellt, {
+          datum: berlinDatum(new Date()),
+          zustaendig: termin?.close_user_id ?? null,
+        }).catch(() => null)
+      : null;
+    await meldeSlack({
+      emoji: "❌",
+      titel: `WhatsApp an ${leadName(termin, n.telefon)} nicht zugestellt`,
+      zeilen: [
+        ...(termin ? terminZeilen(termin) : []),
+        `Grund: ${n.fehler}`,
+        aufgabe ? "📝 Aufgabe „Nummer prüfen und anrufen“ in Close angelegt" : null,
+      ],
+      telefon: n.telefon ?? termin?.telefon,
+      closeLeadId: n.closeLeadId,
+    });
+    if (n.closeLeadId) await setzeCloseStatus(svc, n.closeLeadId, CLOSE_STATUS_WERTE.nichtZugestellt);
   } catch (err) {
     console.error("[whatsapp] Zustellfehler nicht an Close gemeldet:", err);
   }

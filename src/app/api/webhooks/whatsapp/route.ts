@@ -82,7 +82,7 @@ async function verarbeite(body: WaWebhook) {
           try {
             const { data } = await svc
               .from("wa_nachrichten")
-              .select("id, status, typ, vorlage, termin_id, close_lead_id")
+              .select("id, status, typ, vorlage, termin_id, close_lead_id, telefon")
               .eq("wa_message_id", s.id)
               .maybeSingle();
             const alt = data as {
@@ -92,6 +92,7 @@ async function verarbeite(body: WaWebhook) {
               vorlage: string | null;
               termin_id: string | null;
               close_lead_id: string | null;
+              telefon: string | null;
             } | null;
             if (!alt || !darfStatusSetzen(alt.status, neu)) continue; // nie zurückstufen
             const fehler = s.errors?.[0];
@@ -111,6 +112,7 @@ async function verarbeite(body: WaWebhook) {
                 typ: alt.typ,
                 vorlage: alt.vorlage,
                 fehler: fehlerText ?? "ohne Fehlerangabe",
+                telefon: alt.telefon,
               });
             }
           } catch (err) {
