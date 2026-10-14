@@ -5,6 +5,7 @@ import { ladeEinstellungen, speichereEinstellung } from "@/lib/whatsapp/einstell
 import { verarbeiteOffeneEingaenge } from "@/lib/whatsapp/eingang";
 import { verarbeiteJobs } from "@/lib/whatsapp/jobs";
 import { gleicheVorlagenAb } from "@/lib/whatsapp/verwaltung";
+import { sendeFaelligeBerichte } from "@/lib/sales-bericht";
 
 // WhatsApp-Terminbot: minütlich per Supabase pg_cron + pg_net (supabase/cron_whatsapp.sql).
 // Arbeitet liegengebliebene Eingänge und fällige Jobs ab (max. ~50 s) und gleicht stündlich
@@ -40,6 +41,15 @@ export async function GET(request: Request) {
     const message = err instanceof Error ? err.message : String(err);
     await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "jobs" }, error: message });
     antwort.jobsFehler = message;
+  }
+
+  // Sales-Auswertung nach Slack: Mo–Fr 18:00 (freitags + Woche), einmal pro Tag
+  try {
+    if (deadline - Date.now() >= 20_000) antwort.bericht = await sendeFaelligeBerichte(supabase);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "bericht" }, error: message });
+    antwort.berichtFehler = message;
   }
 
   // Vorlagen-Status stündlich abgleichen (nur lesen)
