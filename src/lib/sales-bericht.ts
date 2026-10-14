@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { closeApi, closeUserName, type CloseUser } from "@/lib/integrations/close";
-import { berlinTeile, berlinZeitpunkt, formatDatum } from "@/lib/whatsapp/logik";
+import { artAusCalendly, berlinTeile, berlinZeitpunkt, formatDatum } from "@/lib/whatsapp/logik";
 import { meldeSlack } from "@/lib/whatsapp/slack";
 
 /**
@@ -42,6 +42,7 @@ interface Call {
 
 interface Protokoll {
   user_id: string | null;
+  lead_id: string;
   custom_activity_type_id: string;
   status: string;
   date_created: string;
@@ -53,6 +54,27 @@ interface WaTermin {
   art: string;
   status: string;
   bestaetigt_am: string | null;
+  start_at: string;
+  email: string | null;
+  name: string | null;
+}
+
+/** Geplante Termine: Terminbot-Termine (auch Close-Buchungen) + Calendly-Spiegel, doppelte zusammengefasst. */
+export function geplanteTermine(
+  wa: Array<Pick<WaTermin, "art" | "start_at" | "email" | "name">>,
+  calendly: Array<{ event_type_name: string | null; scheduled_at: string; invitee_email: string | null; invitee_name: string | null }>,
+): Array<{ art: string }> {
+  const schluessel = (start: string, email: string | null, name: string | null) =>
+    `${new Date(start).toISOString().slice(0, 16)}|${(email || name || "").trim().toLowerCase()}`;
+  const m = new Map<string, { art: string }>();
+  for (const t of wa) m.set(schluessel(t.start_at, t.email, t.name), { art: t.art });
+  for (const c of calendly) {
+    const art = artAusCalendly(c.event_type_name);
+    if (!art) continue;
+    const k = schluessel(c.scheduled_at, c.invitee_email, c.invitee_name);
+    if (!m.has(k)) m.set(k, { art });
+  }
+  return [...m.values()];
 }
 
 export interface Zeitraum {
@@ -101,18 +123,69 @@ export function wocheZeitraum(d: Date): Zeitraum {
   return { von, bis, titel: `${kurz(von)} – ${kurz(letzterTag)}` };
 }
 
+/** Je Lead nur das letzte Protokoll eines Typs (Nachträge/Korrekturen am selben Tag nicht doppelt zählen). */
+function letzteJeLead(protokolle: Protokoll[], typ: string): Protokoll[] {
+  const m = new Map<string, Protokoll>();
+  for (const p of protokolle.filter((x) => x.custom_activity_type_id === typ)) {
+    const alt = m.get(p.lead_id);
+    if (!alt || alt.date_created < p.date_created) m.set(p.lead_id, p);
+  }
+  return [...m.values()];
+}
+
+/**
+ * Settings/Closings im Zeitraum: geplant (Terminbot-Termine), protokolliert, erschienen (alles außer No-Show),
+ * Ergebnisse aus „Nächster Schritt“. Rein, testbar.
+ */
+export function terminStatistik(protokolle: Protokoll[], termine: Array<{ art: string }>) {
+  const setting = letzteJeLead(protokolle, PROTOKOLL.setting);
+  const closing = letzteJeLead(protokolle, PROTOKOLL.closing);
+  const sWert = (p: Protokoll) => p[ERGEBNIS_FELD[PROTOKOLL.setting]];
+  const cWert = (p: Protokoll) => p[ERGEBNIS_FELD[PROTOKOLL.closing]];
+  const sErschienen = setting.filter((p) => sWert(p) !== "No-Show");
+  const cErschienen = closing.filter((p) => cWert(p) !== "No SHow");
+  const nUnqualifiziert = sErschienen.filter((p) => sWert(p) === "Nicht qualifiziert" || sWert(p) === "Disqualifiziert").length;
+  return {
+    setting: {
+      geplant: termine.filter((t) => t.art === "erstgespraech").length,
+      protokolliert: setting.length,
+      erschienen: sErschienen.length,
+      noShow: setting.length - sErschienen.length,
+      qualifiziert: sErschienen.length - nUnqualifiziert,
+      closingGelegt: sErschienen.filter((p) => sWert(p) === "Closing gelegt am:").length,
+      followUp: sErschienen.filter((p) => sWert(p) === "Follow-Up vereinbart").length,
+    },
+    closing: {
+      geplant: termine.filter((t) => t.art === "strategie").length,
+      protokolliert: closing.length,
+      erschienen: cErschienen.length,
+      noShow: closing.length - cErschienen.length,
+      geclosed: cErschienen.filter((p) => cWert(p) === "Abgeschlossen").length,
+      cc2: cErschienen.filter((p) => cWert(p) === "CC2 vereinbart am:").length,
+      angebot: cErschienen.filter((p) => cWert(p) === "Angebot versendet").length,
+      unqualifiziert: cErschienen.filter((p) => cWert(p) === "Unqualifiziert").length,
+    },
+  };
+}
+
 export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "tag" | "woche") {
   const params = { date_created__gte: z.von.toISOString(), date_created__lt: z.bis.toISOString() };
-  const [calls, protokolle, users, termineRes] = await Promise.all([
+  const [calls, protokolle, users, termineRes, calendlyRes] = await Promise.all([
     alleSeiten<Call>("/activity/call/", { ...params, _fields: "user_id,direction,disposition,duration,date_created" }),
     alleSeiten<Protokoll>("/activity/custom/", params),
     alleSeiten<CloseUser>("/user/", {}),
     svc
       .from("wa_termine")
-      .select("id, art, status, bestaetigt_am")
+      .select("id, art, status, bestaetigt_am, start_at, email, name")
       .gte("start_at", z.von.toISOString())
       .lt("start_at", z.bis.toISOString())
       .neq("status", "abgesagt"),
+    svc
+      .from("calendly_events")
+      .select("event_type_name, scheduled_at, invitee_email, invitee_name")
+      .gte("scheduled_at", z.von.toISOString())
+      .lt("scheduled_at", z.bis.toISOString())
+      .eq("status", "active"),
   ]);
   const name = new Map(users.map((u) => [u.id, closeUserName(u)]));
   const wer = (id: string | null) => (id ? name.get(id) ?? "Unbekannt" : "Unbekannt");
@@ -182,10 +255,17 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
           .join(" · ")}`,
     );
 
+  const ts = terminStatistik(
+    fertig,
+    geplanteTermine(termine, (calendlyRes.data ?? []) as Parameters<typeof geplanteTermine>[1]),
+  );
   const zeilen = [
     `📞 *Anwahlen:* ${raus.length} · erreicht ${erreicht.length} (${prozent(erreicht.length, raus.length)}) · Gesprächszeit ${minuten(gespraechszeit)}`,
     `📝 *Protokolle:* ${fertig.length} – Cold Call ${anzahl(PROTOKOLL.coldCall)} · Setting ${anzahl(PROTOKOLL.setting)} · Closing ${anzahl(PROTOKOLL.closing)}`,
     `🎯 *Ergebnisse:* ${erfolge.map((e) => `${e.label} ${e.n}`).join(" · ")}`,
+    " ",
+    `🤝 *Settings:* ${ts.setting.geplant} geplant · ${ts.setting.protokolliert} protokolliert · *${ts.setting.erschienen} erschienen* (${prozent(ts.setting.erschienen, ts.setting.protokolliert)}, No-Show ${ts.setting.noShow}) · ${ts.setting.qualifiziert} qualifiziert · *${ts.setting.closingGelegt} zum Closing gelegt*${ts.setting.followUp ? ` · ${ts.setting.followUp} Follow-Up` : ""}`,
+    `💼 *Closings:* ${ts.closing.geplant} geplant · ${ts.closing.protokolliert} protokolliert · *${ts.closing.erschienen} erschienen* (${prozent(ts.closing.erschienen, ts.closing.protokolliert)}, No-Show ${ts.closing.noShow}) · *${ts.closing.geclosed} geclosed* (${prozent(ts.closing.geclosed, ts.closing.erschienen)})${ts.closing.cc2 ? ` · ${ts.closing.cc2} CC2` : ""}${ts.closing.angebot ? ` · ${ts.closing.angebot} Angebot` : ""}`,
     `✅ *Termine bestätigt (WhatsApp):* ${bestaetigt.length} von ${angeschrieben.length} (${prozent(bestaetigt.length, angeschrieben.length)}) – Erstgespräch ${quoteArt("erstgespraech")} · Strategie ${quoteArt("strategie")}${termine.length > angeschrieben.length ? ` · ${termine.length - angeschrieben.length} Termin(e) ohne zugestellte WhatsApp` : ""}`,
     ...(team.length ? [" ", "*Team*", ...team] : []),
   ];
