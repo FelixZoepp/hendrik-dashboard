@@ -43,7 +43,7 @@ export async function GET(request: Request) {
     antwort.jobsFehler = message;
   }
 
-  // Sales-Auswertung nach Slack: Mo–Fr 18:00 (freitags + Woche), einmal pro Tag
+  // Sales-Auswertung nach Slack: Mo–Fr 19:00 (freitags + Woche), einmal pro Tag
   try {
     if (deadline - Date.now() >= 20_000) antwort.bericht = await sendeFaelligeBerichte(supabase);
   } catch (err) {

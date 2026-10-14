@@ -4,12 +4,12 @@ import { berlinTeile, berlinZeitpunkt, formatDatum } from "@/lib/whatsapp/logik"
 import { meldeSlack } from "@/lib/whatsapp/slack";
 
 /**
- * Sales-Auswertung für Slack (#03-sales): Mo–Fr täglich um 18:00 der Tag, freitags zusätzlich die Woche.
+ * Sales-Auswertung für Slack (#03-sales): Mo–Fr täglich um 19:00 der Tag, freitags zusätzlich die Woche.
  * Anwahlen (Close-Calls), Gesprächsprotokolle (Cold Call/Setting/Closing + Ergebnisse) und
  * WhatsApp-Terminbestätigungen. Wird vom minütlichen WhatsApp-Cron angestoßen (einmal pro Tag).
  */
 
-export const BERICHT_STUNDE = 18;
+export const BERICHT_STUNDE = 19;
 const BERICHT_KEY = "sales_bericht_tag";
 
 const PROTOKOLL = {
@@ -197,7 +197,7 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
   };
 }
 
-/** Vom minütlichen Cron: Mo–Fr ab 18:00 einmal pro Tag senden, freitags zusätzlich die Woche. */
+/** Vom minütlichen Cron: Mo–Fr ab 19:00 einmal pro Tag senden, freitags zusätzlich die Woche. */
 export async function sendeFaelligeBerichte(svc: SupabaseClient, jetzt = new Date()): Promise<string> {
   if (!process.env.SLACK_BOT_TOKEN && !process.env.SLACK_WEBHOOK_URL) return "kein Slack";
   const b = berlinTeile(jetzt);
