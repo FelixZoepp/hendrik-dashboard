@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:whatsapp": "node --no-warnings scripts/test-whatsapp-logik.mjs"
+    "test:whatsapp": "node --no-warnings scripts/test-whatsapp-logik.mjs",
+    "test:gespraeche": "node --no-warnings scripts/test-gespraeche.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

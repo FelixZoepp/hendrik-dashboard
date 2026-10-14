@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { closeApi, closeUserName, type CloseUser } from "@/lib/integrations/close";
+import { NAMEN, PROTOKOLL } from "@/lib/close-team";
 import { artAusCalendly, berlinTeile, berlinZeitpunkt, formatDatum } from "@/lib/whatsapp/logik";
 import { meldeSlack } from "@/lib/whatsapp/slack";
 
@@ -11,12 +12,6 @@ import { meldeSlack } from "@/lib/whatsapp/slack";
 
 export const BERICHT_STUNDE = 19;
 const BERICHT_KEY = "sales_bericht_tag";
-
-const PROTOKOLL = {
-  coldCall: "actitype_6Ni7VfN6jGxhWfQEYLkEdK",
-  setting: "actitype_41UXYctoK8pqnPD2TvTGoO",
-  closing: "actitype_71sdCTlSLsK8bWiC802Bn8",
-} as const;
 
 const ERGEBNIS_FELD = {
   [PROTOKOLL.coldCall]: "custom.cf_rYzdqWeplRWv7FFbrhgaXOhKSUxhYgopFVpUmLHFruf",
@@ -104,11 +99,6 @@ const imZeitraum = (iso: string, z: Zeitraum) => {
 /** „ · 2 noch ohne Protokoll“, wenn geplante Termine kein Ergebnis haben */
 const ohneProtokoll = (x: { geplant: number; protokolliert: number }) =>
   x.geplant > x.protokolliert ? ` · ${x.geplant - x.protokolliert} noch ohne Protokoll` : "";
-
-/** Anzeigenamen für Close-Benutzer ohne gepflegten Namen */
-const NAMEN: Record<string, string> = {
-  user_8aTaFHt8ibP9z2u36XGGebbMVGJpqKcaUgpV78UMAwl: "Renney",
-};
 
 const prozent = (teil: number, von: number) => (von ? `${Math.round((teil / von) * 100)} %` : "–");
 const minuten = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} Std. ${Math.round((s % 3600) / 60)} Min.` : `${Math.round(s / 60)} Min.`);

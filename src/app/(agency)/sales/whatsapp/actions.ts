@@ -35,6 +35,10 @@ export async function pinAktion(formData: FormData) {
     revalidatePath(`${PFAD}/chats`);
     redirect(`${PFAD}/chats${r.ok ? "" : `?fehler=${encodeURIComponent(r.meldung)}`}`);
   }
+  if (formData.get("ziel") === "gespraeche") {
+    revalidatePath("/sales/gespraeche");
+    redirect(`/sales/gespraeche${r.ok ? "" : `?fehler=${encodeURIComponent(r.meldung)}`}`);
+  }
   zurueck(r.meldung, !r.ok);
 }
 

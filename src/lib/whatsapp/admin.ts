@@ -15,6 +15,9 @@ const SPERR_KEY = "pin_sperre";
 
 const COOKIE = "wa_admin";
 const GUELTIG_S = 12 * 60 * 60;
+// Gilt für alle geschützten Sales-Seiten (WhatsApp-Bot, Chats, Gespräche).
+// Früher /sales/whatsapp — solche Cookies laufen nach spätestens 12 Std. von selbst ab.
+const COOKIE_PFAD = "/sales";
 
 function sollPin(): string | null {
   const pin = process.env.WHATSAPP_ADMIN_PIN?.trim();
@@ -140,12 +143,12 @@ export async function schalteFrei(pin: string): Promise<{ ok: boolean; meldung: 
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    path: "/sales/whatsapp",
+    path: COOKIE_PFAD,
     maxAge: GUELTIG_S,
   });
   return { ok: true, meldung: "Freigeschaltet (12 Stunden)." };
 }
 
 export async function sperre(): Promise<void> {
-  (await cookies()).delete({ name: COOKIE, path: "/sales/whatsapp" });
+  (await cookies()).delete({ name: COOKIE, path: COOKIE_PFAD });
 }

@@ -15,6 +15,7 @@ import {
   Kanban,
   MessageCircle,
   MessagesSquare,
+  PhoneCall,
   type LucideIcon,
 } from "lucide-react";
 
@@ -37,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Sales", href: "/sales", icon: BarChart3, roles: ["admin", "sales"] },
       { label: "WhatsApp-Bot", href: "/sales/whatsapp", icon: MessageCircle, roles: ["admin", "sales"] },
       { label: "WhatsApp-Chats", href: "/sales/whatsapp/chats", icon: MessagesSquare, roles: ["admin", "sales"] },
+      { label: "Gespräche", href: "/sales/gespraeche", icon: PhoneCall, roles: ["admin", "sales"] },
       { label: "Marketing", href: "/marketing", icon: Megaphone, roles: ["admin"] },
       { label: "Fulfillment", href: "/fulfillment", icon: FolderKanban, roles: ["admin", "fulfillment"] },
       { label: "Kunden", href: "/kunden", icon: Building2, roles: ["admin"] },
