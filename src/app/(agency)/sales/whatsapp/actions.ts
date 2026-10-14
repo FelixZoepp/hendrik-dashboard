@@ -31,6 +31,10 @@ const fehlerText = (err: unknown) => (err instanceof Error ? err.message : Strin
 
 export async function pinAktion(formData: FormData) {
   const r = await schalteFrei(String(formData.get("pin") ?? ""));
+  if (formData.get("ziel") === "chats") {
+    revalidatePath(`${PFAD}/chats`);
+    redirect(`${PFAD}/chats${r.ok ? "" : `?fehler=${encodeURIComponent(r.meldung)}`}`);
+  }
   zurueck(r.meldung, !r.ok);
 }
 
