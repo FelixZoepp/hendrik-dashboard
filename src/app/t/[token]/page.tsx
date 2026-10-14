@@ -6,7 +6,6 @@ import { istDirektesVideo, videoEinbettung } from "@/lib/whatsapp/gate";
 import { googleLink, office365Link, outlookLink, yahooLink } from "@/lib/whatsapp/kalender";
 import { formatUhrzeit, TZ } from "@/lib/whatsapp/logik";
 import { ladeTerminPerToken, type Termin } from "@/lib/whatsapp/termine";
-import { bestaetigenAktion } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -21,13 +20,10 @@ const KNOPF_SEKUNDAER = `${KNOPF} bg-card text-foreground shadow-[inset_0_0_0_1.
  */
 export default async function TerminSeite({
   params,
-  searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { token } = await params;
-  const ok = (await searchParams).ok;
   const svc = createAdminClient();
   const termin = await ladeTerminPerToken(svc, token);
 
@@ -58,7 +54,7 @@ export default async function TerminSeite({
   }
 
   const einstellungen = await ladeEinstellungen(svc);
-  return <TerminInhalt termin={termin} video={einstellungen.videos[termin.art]} ok={typeof ok === "string" ? ok : null} />;
+  return <TerminInhalt termin={termin} video={einstellungen.videos[termin.art]} />;
 }
 
 function Hinweis({ titel, children }: { titel: string; children: React.ReactNode }) {
@@ -70,7 +66,7 @@ function Hinweis({ titel, children }: { titel: string; children: React.ReactNode
   );
 }
 
-function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | null; ok: string | null }) {
+function TerminInhalt({ termin, video }: { termin: Termin; video: string | null }) {
   const start = new Date(termin.start_at);
   const tag = new Intl.DateTimeFormat("de-DE", { timeZone: TZ, weekday: "long", day: "numeric", month: "long" }).format(start);
   const kalender = {
@@ -82,7 +78,6 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
     join_url: termin.join_url,
     seitenUrl: `${terminBasisUrl()}/t/${termin.token}`,
   };
-  const bestaetigen = bestaetigenAktion.bind(null, termin.token);
 
   return (
     <div className="space-y-4">
@@ -114,20 +109,11 @@ function TerminInhalt({ termin, video, ok }: { termin: Termin; video: string | n
           </a>
         )}
 
-        <div className="mt-4 space-y-2.5">
-          {termin.bestaetigt_am || ok === "bestaetigt" ? (
-            <p className="flex items-center justify-center gap-2 rounded-full bg-success/10 py-3 text-[15px] font-medium text-success">
-              <CheckCircle2 className="size-4" /> Vielen Dank, Ihr Termin ist bestätigt
-            </p>
-          ) : (
-            <form action={bestaetigen}>
-              <button type="submit" className={termin.join_url ? KNOPF_SEKUNDAER : KNOPF_PRIMAER}>
-                <CheckCircle2 className="size-4" /> Termin bestätigen
-              </button>
-            </form>
-          )}
-
-        </div>
+        {termin.bestaetigt_am && (
+          <p className="mt-4 flex items-center justify-center gap-2 rounded-full bg-success/10 py-3 text-[15px] font-medium text-success">
+            <CheckCircle2 className="size-4" /> Vielen Dank, Ihr Termin ist bestätigt
+          </p>
+        )}
       </div>
 
       {video && (
