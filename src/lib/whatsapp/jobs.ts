@@ -134,6 +134,7 @@ async function unbestaetigtCheck(svc: SupabaseClient, termin: Termin): Promise<J
   });
   await meldeSlack({
     emoji: "⚠️",
+    erwaehnen: true,
     titel: `${leadName(termin)} hat den Termin noch nicht bestätigt`,
     zeilen: [...terminZeilen(termin), "📝 Aufgabe „Termin nicht bestätigt – kurz anrufen“ in Close angelegt"],
     telefon: termin.telefon,

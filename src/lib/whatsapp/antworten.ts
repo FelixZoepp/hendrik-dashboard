@@ -142,6 +142,7 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
   }).catch(() => null);
   await meldeSlack({
     emoji: "💬",
+    erwaehnen: true,
     titel: `WhatsApp-Antwort von ${leadName(termin, telefon)}`,
     zeilen: [
       `> ${(e.text || `[${e.typ}]`).slice(0, 1500).replace(/\n/g, "\n> ")}`,
@@ -229,6 +230,7 @@ export async function verschiebeWunsch(
   await setzeCloseStatus(svc, termin.close_lead_id, CLOSE_STATUS_WERTE.verschieben);
   await meldeSlack({
     emoji: "🔁",
+    erwaehnen: true,
     titel: `${leadName(termin)} möchte den Termin verschieben`,
     zeilen: [...terminZeilen(termin), aufgabe ? "📝 Aufgabe in Close angelegt – bitte anrufen und neuen Termin legen" : null],
     telefon: termin.telefon,

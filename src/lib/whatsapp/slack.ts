@@ -13,6 +13,17 @@ export interface SlackHinweis {
   zeilen?: Array<string | null | undefined | false>;
   telefon?: string | null;
   closeLeadId?: string | null;
+  /** Handlungsbedarf → Personen aus SLACK_ERWAEHNEN (Slack-User-IDs, kommagetrennt) markieren */
+  erwaehnen?: boolean;
+}
+
+/** „<@U123> <@U456> “ aus SLACK_ERWAEHNEN */
+export function erwaehnungen(roh = process.env.SLACK_ERWAEHNEN): string {
+  const ids = (roh ?? "")
+    .split(/[\s,;]+/)
+    .map((x) => x.trim().replace(/^<?@?|>$/g, ""))
+    .filter((x) => /^[UW][A-Z0-9]{5,}$/.test(x));
+  return ids.map((id) => `<@${id}> `).join("");
 }
 
 interface TerminKurz {
@@ -47,7 +58,7 @@ export function terminZeilen(t: TerminKurz): string[] {
 }
 
 export function baueSlackNachricht(h: SlackHinweis): { text: string; blocks: unknown[] } {
-  const zeilen = [`${h.emoji} *${h.titel}*`, ...(h.zeilen ?? []).filter((z): z is string => !!z)];
+  const zeilen = [`${h.erwaehnen ? erwaehnungen() : ""}${h.emoji} *${h.titel}*`, ...(h.zeilen ?? []).filter((z): z is string => !!z)];
   if (h.telefon) zeilen.push(`📱 ${h.telefon}`);
   const knoepfe: unknown[] = [];
   if (h.telefon) {
@@ -66,7 +77,7 @@ export function baueSlackNachricht(h: SlackHinweis): { text: string; blocks: unk
   }
   const blocks: unknown[] = [{ type: "section", text: { type: "mrkdwn", text: zeilen.join("\n") } }];
   if (knoepfe.length) blocks.push({ type: "actions", elements: knoepfe });
-  return { text: `${h.emoji} ${h.titel}`, blocks };
+  return { text: `${h.erwaehnen ? erwaehnungen() : ""}${h.emoji} ${h.titel}`, blocks };
 }
 
 export async function meldeSlack(h: SlackHinweis): Promise<void> {

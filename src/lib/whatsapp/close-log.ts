@@ -342,6 +342,7 @@ export async function meldeNichtZugestellt(
       : null;
     await meldeSlack({
       emoji: "❌",
+    erwaehnen: true,
       titel: `WhatsApp an ${leadName(termin, n.telefon)} nicht zugestellt`,
       zeilen: [
         ...(termin ? terminZeilen(termin) : []),
