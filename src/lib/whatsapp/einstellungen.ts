@@ -8,6 +8,8 @@ export interface WaEinstellungen {
   vorlagen_aktiv: Record<string, boolean>;
   /** Close-Feld (z. B. "custom.cf_…" oder Feldname) mit „Ja“ = WhatsApp-Einwilligung; null = Close-Termine senden nie */
   close_optin_feld: string | null;
+  /** Close-Lead-Feld „WhatsApp-Termin“ (z. B. "custom.cf_…") für den Bestätigungsstatus; null = nicht setzen */
+  close_status_feld: string | null;
   videos: { erstgespraech: string | null; strategie: string | null };
   buchungslinks: { erstgespraech: string | null; strategie: string | null };
   vorlagen_abgleich_am: string | null;
@@ -18,6 +20,7 @@ export const STANDARD_EINSTELLUNGEN: WaEinstellungen = {
   testnummern: [],
   vorlagen_aktiv: Object.fromEntries(VORLAGEN_NAMEN.map((n) => [n, false])),
   close_optin_feld: null,
+  close_status_feld: null,
   videos: { erstgespraech: null, strategie: null },
   buchungslinks: { erstgespraech: null, strategie: null },
   vorlagen_abgleich_am: null,
@@ -42,7 +45,8 @@ export async function ladeEinstellungen(svc: SupabaseClient): Promise<WaEinstell
         }
         break;
       case "close_optin_feld":
-        e.close_optin_feld = typeof w === "string" && w.trim() ? w.trim() : null;
+      case "close_status_feld":
+        e[row.key] = typeof w === "string" && w.trim() ? w.trim() : null;
         break;
       case "videos":
       case "buchungslinks":

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { aufgabeAnLead } from "./close-log";
+import { aufgabeAnLead, setzeCloseStatus } from "./close-log";
+import { CLOSE_STATUS_WERTE } from "./einrichtung";
 import { OhneWiederholung, sendeVorlage, VersandUnklar } from "./gate";
 import {
   anredeName,
@@ -125,6 +126,7 @@ async function unbestaetigtCheck(svc: SupabaseClient, termin: Termin): Promise<J
     .in("status", ["gesendet", "zugestellt", "gelesen"]);
   if (error) throw new Error(`Nachrichten nicht lesbar: ${error.message}`);
   if (!count) return { status: "uebersprungen", ergebnis: "Keine Bestätigungsanfrage gesendet" };
+  await setzeCloseStatus(svc, termin.close_lead_id, CLOSE_STATUS_WERTE.unbestaetigt);
   const id = await aufgabeAnLead(termin.close_lead_id, AUFGABEN.unbestaetigt, {
     datum: berlinDatum(new Date()),
     zustaendig: termin.close_user_id,

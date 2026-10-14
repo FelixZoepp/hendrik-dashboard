@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { MetaFehler, sendeTextRoh, sendeVideoRoh, sendeVorlageRoh, waVerbindung } from "./client";
-import { notizSicher } from "./close-log";
+import { notizSicher, setzeCloseStatus } from "./close-log";
+import { CLOSE_STATUS_WERTE } from "./einrichtung";
 import { ladeEinstellungen, type WaEinstellungen } from "./einstellungen";
 import { normalisiereTelefon, ruhezeitEntscheidung, versandSchluessel, waNummer, type JobTyp } from "./logik";
 
@@ -309,6 +310,10 @@ export async function sendeVorlage(
     .eq("id", zeileId);
   if (uFehler) console.error("[whatsapp] Versand nicht protokolliert:", uFehler.message);
   await notizSicher(o.termin.close_lead_id, `WhatsApp gesendet: ${o.vorlage.name}\n\n${body}`);
+  // Statusfeld im CRM: Bitte um Bestätigung ist raus (nicht zurücksetzen, falls schon bestätigt)
+  if (o.typ === "gebucht" && !o.termin.bestaetigt_am) {
+    await setzeCloseStatus(svc, o.termin.close_lead_id, CLOSE_STATUS_WERTE.gesendet);
+  }
   return { gesendet: true, waMessageId };
 }
 

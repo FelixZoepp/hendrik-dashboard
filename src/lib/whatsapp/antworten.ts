@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { aufgabeAnLead, findeCloseLead, notizSicher } from "./close-log";
+import { aufgabeAnLead, findeCloseLead, notizSicher, setzeCloseStatus } from "./close-log";
+import { CLOSE_STATUS_WERTE } from "./einrichtung";
 import { ladeEinstellungen } from "./einstellungen";
 import { istDirektesVideo, sendeFreitext, sendeVideo } from "./gate";
 import { berlinDatum, erkenneAntwort, formatDatum, formatUhrzeit, istOhneInhalt, normalisiereTelefon } from "./logik";
@@ -114,6 +115,7 @@ export async function verarbeiteEingang(svc: SupabaseClient, e: Eingang): Promis
     // Abmeldung ist oben schon gespeichert; jetzt Bestätigung + Notiz
     await sendeFreitext(svc, { telefon, text: FREITEXTE.stop, termin, closeLeadId, pflichtAntwort: true });
     await notizSicher(closeLeadId, "WhatsApp abgemeldet (STOP) – der Bot sendet keine Nachrichten mehr an diese Nummer.");
+    await setzeCloseStatus(svc, closeLeadId, CLOSE_STATUS_WERTE.abgemeldet);
     return { aktion: "stop" };
   }
 
@@ -158,6 +160,7 @@ export async function bestaetigeTermin(
     termin.close_lead_id,
     `${artLabel(termin)} am ${wann(termin)} ${opts.quelle === "seite" ? "über die Termin-Seite" : "per WhatsApp"} bestätigt`,
   );
+  await setzeCloseStatus(svc, termin.close_lead_id, CLOSE_STATUS_WERTE.bestaetigt);
 
   if (!termin.telefon) return { gesendet: false };
   const video = (await ladeEinstellungen(svc)).videos[termin.art];
@@ -197,6 +200,7 @@ export async function verschiebeWunsch(
     termin.close_lead_id,
     `Lead möchte ${artLabel(termin)} am ${wann(termin)} verschieben (${opts.quelle === "seite" ? "Termin-Seite" : "WhatsApp"})`,
   );
+  await setzeCloseStatus(svc, termin.close_lead_id, CLOSE_STATUS_WERTE.verschieben);
 
   // Bewusst keine Antwort und kein Umbuch-Link (Entscheidung Felix 13.10.) — das Team meldet sich über die Aufgabe.
   return { aufgabe };

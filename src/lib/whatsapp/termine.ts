@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fuehreBotLeadZusammen } from "./close-log";
 import {
   folgeJobsNachStartaenderung,
   istGleicherTermin,
@@ -34,6 +35,8 @@ export interface Termin {
   join_url: string | null;
   ort_text: string | null;
   close_lead_id: string | null;
+  /** Lead wurde vom Bot aus der Calendly-Buchung angelegt (bis zur Zusammenführung mit dem echten Lead) */
+  close_lead_angelegt: boolean;
   close_opp_id: string | null;
   close_protokoll_id: string | null;
   ergebnis_protokoll_id: string | null;
@@ -112,8 +115,13 @@ async function fuehreZusammen(
   if (bestehend.status !== "geplant") return { termin: bestehend, aktion: "inaktiv", startGeaendert: false };
 
   const z = zusammenfuehren(alsDaten(bestehend), eingabe, gleicheQuelle);
+  // Vom Bot angelegten Close-Lead in den Lead aus dem Protokoll legen — nie blockierend
+  const leadMerge = async () => {
+    if (z.leadZusammenfuehren) await fuehreBotLeadZusammen(svc, { ...z.leadZusammenfuehren, terminId: bestehend.id });
+  };
   if (Object.keys(z.patch).length === 0) {
     await planeJobs(svc, bestehend, jetzt);
+    await leadMerge();
     return { termin: bestehend, aktion: "unveraendert", startGeaendert: false };
   }
   const update: Record<string, unknown> = { ...z.patch };
@@ -128,7 +136,14 @@ async function fuehreZusammen(
   await planeJobs(svc, termin, jetzt);
   if (z.startGeaendert) await rechneFolgeJobsUm(svc, termin, jetzt, z.bestaetigungZuruecksetzen);
   if (z.optInGewonnen) await gebuchtWiederAktivieren(svc, termin, jetzt);
+  await leadMerge();
   return { termin, aktion: "zusammengefuehrt", startGeaendert: z.startGeaendert };
+}
+
+/** Close-Lead eines schon vorhandenen passenden Termins (vor dem Anlegen eines neuen Leads prüfen). */
+export async function leadEinesPassendenTermins(svc: SupabaseClient, e: TerminEingabe): Promise<string | null> {
+  const t = await findeBestehenden(svc, e);
+  return t?.termin.close_lead_id ?? null;
 }
 
 async function findeBestehenden(

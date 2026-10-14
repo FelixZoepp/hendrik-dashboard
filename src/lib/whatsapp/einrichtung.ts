@@ -3,12 +3,26 @@ import { closeApi } from "@/lib/integrations/close";
 import { speichereEinstellung } from "./einstellungen";
 
 /**
- * Einmalige Einrichtung (nur per Knopf im Dashboard): Close-Einwilligungsfeld und Calendly-Webhook.
+ * Einmalige Einrichtung (nur per Knopf im Dashboard): Close-Einwilligungsfeld, Close-Statusfeld und Calendly-Webhook.
  * Läuft serverseitig, weil CLOSE_API_KEY / CALENDLY_API_KEY in Vercel geschützt (nicht lesbar) sind.
- * Beide Funktionen sind idempotent — vorhandenes Feld bzw. vorhandener Webhook wird wiederverwendet.
+ * Alle Funktionen sind idempotent — vorhandenes Feld bzw. vorhandener Webhook wird wiederverwendet.
  */
 
 export const CLOSE_OPTIN_FELDNAME = "WhatsApp-Bestätigung ok";
+
+/** Lead-Feld mit dem Bestätigungsstatus des Bots (im CRM sichtbar). */
+export const CLOSE_STATUS_FELDNAME = "WhatsApp-Termin";
+
+export const CLOSE_STATUS_WERTE = {
+  gesendet: "Bestätigung gesendet",
+  bestaetigt: "Bestätigt",
+  unbestaetigt: "Nicht bestätigt",
+  verschieben: "Verschieben gewünscht",
+  nichtZugestellt: "Nicht zugestellt",
+  abgemeldet: "Abgemeldet",
+} as const;
+
+export type CloseStatusWert = (typeof CLOSE_STATUS_WERTE)[keyof typeof CLOSE_STATUS_WERTE];
 
 /** Webhooks laufen über die Vercel-Domain, damit sie unabhängig vom DNS der Termin-Domain funktionieren. */
 function webhookBasis(): string {
@@ -32,6 +46,41 @@ export async function legeCloseFeldAn(svc: SupabaseClient): Promise<{ feld: stri
   const feld = `custom.${id}`;
   await speichereEinstellung(svc, "close_optin_feld", feld);
   return { feld, neu };
+}
+
+/**
+ * Lead-Feld „WhatsApp-Termin“ (Auswahl, siehe CLOSE_STATUS_WERTE) anlegen bzw. finden und als
+ * Statusfeld speichern. Fehlende Auswahlwerte an einem vorhandenen Feld werden ergänzt.
+ */
+export async function legeCloseStatusFeldAn(svc: SupabaseClient): Promise<{ feld: string; neu: boolean }> {
+  const werte: string[] = Object.values(CLOSE_STATUS_WERTE);
+  const { data } = await closeApi<{ data: Array<{ id: string; name: string; type?: string; choices?: string[] | null }> }>(
+    "/custom_field/lead/",
+    { params: { _limit: "200" } },
+  );
+  const vorhanden = data.find((f) => f.name.trim().toLowerCase() === CLOSE_STATUS_FELDNAME.toLowerCase());
+  let id = vorhanden?.id;
+  if (vorhanden && vorhanden.type && vorhanden.type !== "choices") {
+    throw new Error(`Close-Feld „${CLOSE_STATUS_FELDNAME}“ existiert schon mit Typ ${vorhanden.type} (erwartet: Auswahl)`);
+  }
+  if (vorhanden) {
+    const fehlend = werte.filter((w) => !(vorhanden.choices ?? []).includes(w));
+    if (fehlend.length) {
+      await closeApi(`/custom_field/lead/${vorhanden.id}/`, {
+        method: "PUT",
+        body: { choices: [...(vorhanden.choices ?? []), ...fehlend] },
+      });
+    }
+  } else {
+    const f = await closeApi<{ id: string }>("/custom_field/lead/", {
+      method: "POST",
+      body: { name: CLOSE_STATUS_FELDNAME, type: "choices", choices: werte, accepts_multiple_values: false },
+    });
+    id = f.id;
+  }
+  const feld = `custom.${id}`;
+  await speichereEinstellung(svc, "close_status_feld", feld);
+  return { feld, neu: !vorhanden };
 }
 
 async function calendly<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {

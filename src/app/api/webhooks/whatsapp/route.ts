@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { meldeNichtZugestellt } from "@/lib/whatsapp/close-log";
 import { speichereEingang, verarbeiteOffeneEingaenge, type WaNachricht } from "@/lib/whatsapp/eingang";
 import { darfStatusSetzen } from "@/lib/whatsapp/logik";
 
@@ -79,19 +80,39 @@ async function verarbeite(body: WaWebhook) {
           const neu = STATUS[s.status];
           if (!neu) continue;
           try {
-            const { data } = await svc.from("wa_nachrichten").select("id, status").eq("wa_message_id", s.id).maybeSingle();
-            const alt = data as { id: string; status: string } | null;
+            const { data } = await svc
+              .from("wa_nachrichten")
+              .select("id, status, typ, vorlage, termin_id, close_lead_id")
+              .eq("wa_message_id", s.id)
+              .maybeSingle();
+            const alt = data as {
+              id: string;
+              status: string;
+              typ: string | null;
+              vorlage: string | null;
+              termin_id: string | null;
+              close_lead_id: string | null;
+            } | null;
             if (!alt || !darfStatusSetzen(alt.status, neu)) continue; // nie zurückstufen
             const fehler = s.errors?.[0];
-            await svc
+            const fehlerText = fehler
+              ? [fehler.code, fehler.title, fehler.error_data?.details].filter(Boolean).join(" · ").slice(0, 500)
+              : null;
+            const { error: uFehler } = await svc
               .from("wa_nachrichten")
-              .update({
-                status: neu,
-                ...(fehler
-                  ? { fehler: [fehler.code, fehler.title, fehler.error_data?.details].filter(Boolean).join(" · ").slice(0, 500) }
-                  : {}),
-              })
+              .update({ status: neu, ...(fehlerText ? { fehler: fehlerText } : {}) })
               .eq("id", alt.id);
+            if (uFehler) throw new Error(`Status nicht gespeichert: ${uFehler.message}`);
+            // Fehlversuch im CRM sichtbar machen (Notiz + Statusfeld)
+            if (neu === "fehlgeschlagen") {
+              await meldeNichtZugestellt(svc, {
+                closeLeadId: alt.close_lead_id,
+                terminId: alt.termin_id,
+                typ: alt.typ,
+                vorlage: alt.vorlage,
+                fehler: fehlerText ?? "ohne Fehlerangabe",
+              });
+            }
           } catch (err) {
             await logFehler({ status: s.id }, err instanceof Error ? err.message : String(err));
           }

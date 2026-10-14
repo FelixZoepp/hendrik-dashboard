@@ -6,12 +6,15 @@ import {
   findeCloseLead,
   istJa,
   ladeLead,
+  legeCloseLeadAn,
   notizSicher,
+  pipelineNachBuchung,
 } from "./close-log";
 import { ladeEinstellungen } from "./einstellungen";
 import { artAusCalendly, hatUhrzeit, normalisiereTelefon, vornameAus, type TerminArt } from "./logik";
 import {
   legeAbsagePlatzhalterAn,
+  leadEinesPassendenTermins,
   legeTerminAn,
   letzterTerminDesLeads,
   markiereStattgefunden,
@@ -82,6 +85,16 @@ export function telefonAusCalendly(p: NonNullable<CalendlyWebhook["payload"]>): 
   return { telefon: null, optIn: false };
 }
 
+/** Alle Telefonnummern einer Calendly-Buchung (normalisiert, ohne Doppelte) — für die Lead-Suche in Close. */
+export function alleTelefoneAusCalendly(p: NonNullable<CalendlyWebhook["payload"]>): string[] {
+  const kandidaten = [
+    ...(p.questions_and_answers ?? []).filter((qa) => TELEFON_FRAGE.test(qa.question)).map((qa) => qa.answer),
+    p.scheduled_event?.location?.type === "outbound_call" ? p.scheduled_event.location.location : null,
+    p.text_reminder_number,
+  ];
+  return [...new Set(kandidaten.map((k) => normalisiereTelefon(k)).filter((t): t is string => !!t))];
+}
+
 /** Lesbarer Ort für {{4}} im Strategiegespräch. */
 export function ortAusCalendly(ort: CalendlyOrt | null | undefined): string | null {
   if (!ort?.type) return null;
@@ -137,10 +150,12 @@ export async function verarbeiteCalendly(
   const { telefon, optIn } = telefonAusCalendly(p);
   const email = p.email?.trim().toLowerCase() || null;
   const gastgeber = ev.event_memberships?.[0];
-  const [closeLeadId, closeUserId] = await Promise.all([
-    findeCloseLead(svc, { email, telefon }).catch(() => null),
+  const [gefundenerLead, closeUserId] = await Promise.all([
+    findeCloseLead(svc, { email, telefon, telefone: alleTelefoneAusCalendly(p) }).catch(() => null),
     closeBenutzerPerEmail(svc, gastgeber?.user_email).catch(() => null),
   ]);
+  const name = p.name?.trim() || null;
+  const firma = p.questions_and_answers?.find((qa) => /unternehmen|firma/i.test(qa.question))?.answer?.trim() || null;
 
   const eingabe: TerminEingabe = {
     art,
@@ -153,19 +168,57 @@ export async function verarbeiteCalendly(
     cancel_url: p.cancel_url ?? null,
     join_url: ev.location?.join_url ?? null,
     ort_text: ortAusCalendly(ev.location),
-    close_lead_id: closeLeadId,
+    close_lead_id: gefundenerLead,
     close_user_id: closeUserId,
     gastgeber_name: gastgeber?.user_name ?? null,
-    name: p.name?.trim() || null,
+    name,
     vorname: p.first_name?.trim() || vornameAus(p.name),
-    firma: p.questions_and_answers?.find((qa) => /unternehmen|firma/i.test(qa.question))?.answer?.trim() || null,
+    firma,
     telefon,
     email,
     // Einwilligung: Nummer beim Buchen angegeben
     opt_in: optIn,
   };
+
+  // Kein Lead in Close → anlegen, außer ein passender Termin (Wiederholung, Close-Protokoll) kennt schon einen
+  const logFehler = (aktion: string, err: unknown) =>
+    svc.from("webhook_errors").insert({
+      endpoint: "calendly",
+      payload: { aktion, scheduled_event: ev.uri },
+      error: err instanceof Error ? err.message : String(err),
+    });
+  if (!eingabe.close_lead_id) {
+    try {
+      eingabe.close_lead_id = await leadEinesPassendenTermins(svc, eingabe);
+      if (!eingabe.close_lead_id) {
+        eingabe.close_lead_id = await legeCloseLeadAn({ art, name, firma, email, telefon });
+        eingabe.close_lead_angelegt = true;
+      }
+    } catch (err) {
+      // Termin trotzdem anlegen (ohne Lead)
+      await logFehler("close_lead_anlegen", err);
+    }
+  }
+
   const r = await legeTerminAn(svc, eingabe, jetzt);
-  return { aktion: r.aktion, termin: r.termin.id, startGeaendert: r.startGeaendert };
+  const ergebnis: Record<string, unknown> = { aktion: r.aktion, termin: r.termin.id, startGeaendert: r.startGeaendert };
+  if (eingabe.close_lead_angelegt) ergebnis.leadAngelegt = eingabe.close_lead_id;
+
+  // Pipeline in Close (best effort): neu, verschoben oder noch ohne Opportunity
+  const t = r.termin;
+  if (r.aktion !== "inaktiv" && t.close_lead_id && (r.aktion === "neu" || r.startGeaendert || !t.close_opp_id)) {
+    try {
+      const pipeline = await pipelineNachBuchung({ leadId: t.close_lead_id, art: t.art, startAt: t.start_at, userId: t.close_user_id });
+      ergebnis.pipeline = pipeline.aktion;
+      if (pipeline.oppId !== t.close_opp_id) {
+        const { error } = await svc.from("wa_termine").update({ close_opp_id: pipeline.oppId }).eq("id", t.id);
+        if (error) throw new Error(`Opportunity nicht am Termin gespeichert: ${error.message}`);
+      }
+    } catch (err) {
+      await logFehler("close_pipeline", err);
+    }
+  }
+  return ergebnis;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,11 +1,13 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { after, NextResponse } from "next/server";
+import { ABGESCHLOSSEN, darfVorwaerts, LEAD, OPP, OPP_TERMIN_AM_FELD, pipelineStand } from "@/lib/close-pipeline";
 import { closeApi } from "@/lib/integrations/close";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { verarbeiteCloseProtokoll } from "@/lib/whatsapp/quellen";
 
 // Close-Webhook: Gesprächsprotokolle (Cold Call, Setting, Closing) steuern
 // automatisch die Pipeline "Setter-Closer Hoffmann Solutions" und den Lead-Status.
+// Status-IDs und Rangfolge: src/lib/close-pipeline.ts (auch vom WhatsApp-Terminbot genutzt).
 
 const PROTOKOLL = {
   coldCall: "actitype_6Ni7VfN6jGxhWfQEYLkEdK",
@@ -20,48 +22,9 @@ const FIELD = {
   closingNaechsterSchritt: "custom.cf_9vkQK8YANMMZ3lyt0aAZbAnkAxYoB15WwM5sTyr3veM",
   kalender: "custom.cf_EpznggdfbBEro7qnHRqJ10WaPHxeo80ZndzLqbdsV81",
   gelegtAuf: "custom.cf_F5t5yfr7IWVSqPFq8sdQKwoqJFb5X5I3tCtDtF2Mg3a",
-  oppTerminAm: "custom.cf_I3BNybAZ6KvH3SHWjaWOo2tufWH0ylIn29vMnIU07qY",
+  oppTerminAm: OPP_TERMIN_AM_FELD,
   leadFollowUpDatum: "custom.cf_fH4FD8GddOQKC4bNedpVbmEtRfNzC7zVlLve1zIGS5Y",
   leadGesperrtBis: "custom.cf_DNwjp8sYfNgqXgBFBexHlGRN57ADeAWGR5Lojc0qEL9",
-};
-
-const OPP = {
-  settingTerminiert: "stat_4p97QFLGWcJTiOLz4s1bYtWKBVQR50XaQpHUdfhe8UC",
-  settingNoShow: "stat_pGAeTxZ2rkNIzksWsLHKoHJdllKUCWUuqLs4dH9edNZ",
-  settingFollowUp: "stat_S4XYNlf3MhHEKnvjbiCeUYJg52iX6dFWkaWuUoFg8xE",
-  closingTerminiert: "stat_KSyJfnSIxwTUu4e9gJhhjoI7zn6b2pTALKpD4MIL3q0",
-  closingNoShow: "stat_dXLGmLsbyoD77vFRmaY0dDm5jPd3MMxwz291MF6gxUK",
-  closingFollowUp: "stat_77oJcfWYHn8JEIIS1mvBtQdCZn1ibDtpOgI6XX1Q37Y",
-  cc2Vereinbart: "stat_a8IP5oWXJtjSAsFFlZyQfmBBTgBPpktTTaX67IJe7c9",
-  angebotVersendet: "stat_gtUPpOqoO1rgiamIUWB16xljZO3RWyJy6u4wFUL0ThO",
-  verkauft: "stat_E7Pi9IXxDFN2ZVi4JSjMX2lVAunuiMhPziMM6rC4apn",
-  verloren: "stat_7ZzzWHiE2qep8OKcGjELV6fGIIrpWgZbdYOY7tzFxdZ",
-};
-
-// Rangfolge der Setter-Closer-Pipeline — Opportunities laufen nur vorwärts
-const RANG: Record<string, number> = {
-  [OPP.settingTerminiert]: 1,
-  [OPP.settingNoShow]: 1,
-  [OPP.settingFollowUp]: 1,
-  [OPP.closingTerminiert]: 2,
-  [OPP.closingNoShow]: 2,
-  [OPP.closingFollowUp]: 2,
-  [OPP.cc2Vereinbart]: 3,
-  [OPP.angebotVersendet]: 4,
-  [OPP.verkauft]: 5,
-  [OPP.verloren]: 5,
-};
-const ABGESCHLOSSEN = new Set([OPP.verkauft, OPP.verloren]);
-
-const LEAD = {
-  interessiert: "stat_Aovea3A7R0A8m2vWAJF2sS7s44TM5VNldFh07t0wwqP",
-  keinInteresse: "stat_1gD0nIgiioj0gVbsBH8DSQtEZuppHg54A4PIOCGtwtw",
-  followUp: "stat_Zkys2rUO8HpYAUoSedsrAKBmvhl2yjyM37R8hPNoDm0",
-  setting: "stat_ityX5rSG4nUeLnyzHXmPY3pu1oGLCh18lTG2xeGlHzu",
-  closing: "stat_YEoiWledPo9QiondDWkVs68QBvm7NCc7UUrsge6EQCM",
-  disqualifiziert: "stat_d8wp87FelzfIADu2p4nYIE1YCXsvgtpEED6osK8PQTH",
-  unqualifiziert: "stat_5sAl7XILLyqYTCakLOosngsJy9dDJMaWLVhvqZYwzmC",
-  kunde: "stat_X6PkUBGnxmMRurKXzybtmb3p6pGqWV7KE5RNuCWcpvV",
 };
 
 interface Aktion {
@@ -216,18 +179,15 @@ async function fuehreAus(protokoll: Protokoll, aktion: Aktion) {
     `/lead/${leadId}/`,
     { params: { _fields: "status_id,opportunities" } },
   );
-  const pipelineOpps = lead.opportunities.filter((o) => o.status_id in RANG);
   // Bei mehreren laufenden Deals nur den zuletzt bearbeiteten bewegen
-  const aktiv = pipelineOpps
-    .filter((o) => !ABGESCHLOSSEN.has(o.status_id))
-    .sort((a, b) => b.date_updated.localeCompare(a.date_updated))[0];
+  const { pipelineOpps, aktiv } = pipelineStand(lead.opportunities);
 
   if (aktion.nurVorPipeline && (aktiv || lead.status_id === LEAD.kunde)) {
     return { skipped: "Lead läuft bereits in der Pipeline" };
   }
 
   if (aktion.opp) {
-    if (aktiv && RANG[aktion.opp] < RANG[aktiv.status_id]) {
+    if (aktiv && !darfVorwaerts(aktion.opp, aktiv.status_id)) {
       return { skipped: "Opportunity ist schon weiter" };
     }
 

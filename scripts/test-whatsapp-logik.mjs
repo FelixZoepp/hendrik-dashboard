@@ -1,5 +1,5 @@
 // Prüft die reinen Funktionen des WhatsApp-Terminbots (Zeitplan, Ruhezeit, Telefon,
-// Antwort-Erkennung, Zusammenführen, Vorlagen-Regeln).
+// Antwort-Erkennung, Zusammenführen, Bestätigungsquote, Close-Pipeline, Vorlagen-Regeln).
 // Aufruf: node scripts/test-whatsapp-logik.mjs   (Node ≥ 22.18 / 23.6 für TypeScript-Imports)
 
 import assert from "node:assert/strict";
@@ -7,7 +7,10 @@ import {
   anredeName,
   artAusCalendly,
   berlinZeitpunkt,
+  bestaetigungsQuote,
   darfStatusSetzen,
+  emailDomain,
+  firmenDomain,
   erinnerungsTag,
   erkenneAntwort,
   formatDatum,
@@ -30,6 +33,7 @@ import {
   zusammenfuehren,
 } from "../src/lib/whatsapp/logik.ts";
 import { metaDefinition, pruefeVorlage, renderBody, VORLAGEN } from "../src/lib/whatsapp/vorlagen.ts";
+import { LEAD, OPP, pipelineFuerBuchung } from "../src/lib/close-pipeline.ts";
 
 let ok = 0;
 let fehler = 0;
@@ -338,6 +342,133 @@ test("Calendly-Termin, gleiche Nummer: Close nimmt Einwilligung nicht weg", () =
   const z = zusammenfuehren({ ...calendly, opt_in: true }, { ...close, opt_in: false }, true);
   assert.equal(z.patch.opt_in, undefined);
 });
+
+console.log("Abgleich per Domain / Gastgeber");
+test("emailDomain / firmenDomain (Freemail → null)", () => {
+  assert.equal(emailDomain("J.Acar@AlphaKlima.de"), "alphaklima.de");
+  assert.equal(firmenDomain("j.acar@alphaklima.de"), "alphaklima.de");
+  assert.equal(firmenDomain("max@gmail.com"), null);
+  assert.equal(firmenDomain("max@GMX.net"), null);
+  assert.equal(firmenDomain("max@proton.me"), null);
+  assert.equal(firmenDomain("kaputt"), null);
+  assert.equal(firmenDomain(null), null);
+});
+test("gleiche Firmen-Domain → derselbe Termin (alphaklima-Fall)", () =>
+  assert.equal(
+    istGleicherTermin(
+      { ...close, telefon: "+4921317390420", email: "info@alphaklima.de" },
+      { ...calendly, telefon: "+491735314467", email: "j.acar@alphaklima.de" },
+    ),
+    true,
+  ));
+test("gleiche Freemail-Domain → nicht derselbe", () =>
+  assert.equal(
+    istGleicherTermin({ ...close, telefon: null, email: "a@gmail.com" }, { ...calendly, telefon: null, email: "b@gmail.com" }),
+    false,
+  ));
+const ohneMerkmal = { ...calendly, telefon: "+491700000000", email: "x@firma-b.de", close_user_id: "user_1" };
+test("gleicher Gastgeber, ±5 Min., einer ohne Lead → derselbe", () =>
+  assert.equal(
+    istGleicherTermin({ ...close, close_user_id: "user_1", start_at: B(2026, 10, 15, 10, 12).toISOString() }, ohneMerkmal),
+    true,
+  ));
+test("gleicher Gastgeber, aber > 5 Min. auseinander → nicht derselbe", () =>
+  assert.equal(istGleicherTermin({ ...close, close_user_id: "user_1" }, ohneMerkmal), false));
+test("gleicher Gastgeber, beide mit (verschiedenem) Lead → nicht derselbe", () =>
+  assert.equal(
+    istGleicherTermin(
+      { ...close, close_user_id: "user_1", start_at: B(2026, 10, 15, 10, 15).toISOString() },
+      { ...ohneMerkmal, close_lead_id: "lead_2" },
+    ),
+    false,
+  ));
+test("anderer Gastgeber → nicht derselbe", () =>
+  assert.equal(
+    istGleicherTermin({ ...close, close_user_id: "user_2", start_at: B(2026, 10, 15, 10, 15).toISOString() }, ohneMerkmal),
+    false,
+  ));
+
+console.log("Vom Bot angelegter Lead");
+const botTermin = { ...calendly, close_lead_id: "lead_bot", close_lead_angelegt: true };
+test("Close-Protokoll in Termin mit Bot-Lead: Protokoll-Lead gewinnt, Bot-Lead wird zusammengeführt", () => {
+  const z = zusammenfuehren(botTermin, { ...close, close_lead_id: "lead_echt", close_protokoll_id: "acti_1" });
+  assert.equal(z.patch.close_lead_id, "lead_echt");
+  assert.equal(z.patch.close_lead_angelegt, false);
+  assert.deepEqual(z.leadZusammenfuehren, { quelle: "lead_bot", ziel: "lead_echt" });
+  assert.equal(z.patch.start_at, undefined, "Calendly-Start bleibt");
+});
+test("Protokoll mit demselben Lead → nichts zusammenzuführen", () => {
+  const z = zusammenfuehren(botTermin, { ...close, close_lead_id: "lead_bot", close_protokoll_id: "acti_1" });
+  assert.equal(z.leadZusammenfuehren, null);
+  assert.equal("close_lead_angelegt" in z.patch, false);
+});
+test("Calendly-Lead (nicht vom Bot) wird vom Protokoll-Lead ersetzt, ohne Zusammenführen", () => {
+  const z = zusammenfuehren({ ...calendly, close_lead_id: "lead_gefunden" }, { ...close, close_lead_id: "lead_echt", close_protokoll_id: "acti_1" });
+  assert.equal(z.patch.close_lead_id, "lead_echt");
+  assert.equal(z.leadZusammenfuehren, null);
+});
+test("Calendly mit Bot-Lead in Close-Termin: Protokoll-Lead bleibt, Bot-Lead wird zusammengeführt", () => {
+  const z = zusammenfuehren(
+    { ...close, close_lead_id: "lead_echt", close_protokoll_id: "acti_1" },
+    { ...calendly, close_lead_id: "lead_bot", close_lead_angelegt: true },
+  );
+  assert.equal(z.patch.close_lead_id, undefined);
+  assert.equal("close_lead_angelegt" in z.patch, false);
+  assert.deepEqual(z.leadZusammenfuehren, { quelle: "lead_bot", ziel: "lead_echt" });
+  assert.equal(z.patch.calendly_event_uri, calendly.calendly_event_uri, "Calendly-Daten kommen trotzdem rein");
+});
+
+console.log("Bestätigungsquote");
+test("nur zugestellte Buchungsnachrichten, Abgesagte zählen nicht, je Art", () => {
+  const termine = [
+    { id: "a", art: "erstgespraech", status: "geplant", bestaetigt_am: "2026-10-14T08:00:00Z" },
+    { id: "b", art: "erstgespraech", status: "stattgefunden", bestaetigt_am: null },
+    { id: "c", art: "strategie", status: "verpasst", bestaetigt_am: "2026-10-14T08:00:00Z" },
+    { id: "d", art: "strategie", status: "abgesagt", bestaetigt_am: "2026-10-14T08:00:00Z" },
+    { id: "e", art: "erstgespraech", status: "geplant", bestaetigt_am: "2026-10-14T08:00:00Z" },
+  ];
+  const q = bestaetigungsQuote(termine, new Set(["a|gebucht", "b|gebucht", "c|gebucht", "d|gebucht"]));
+  assert.deepEqual(q.gesamt, { bestaetigt: 2, von: 3 });
+  assert.deepEqual(q.erstgespraech, { bestaetigt: 1, von: 2 });
+  assert.deepEqual(q.strategie, { bestaetigt: 1, von: 1 });
+});
+test("keine Termine → 0 von 0", () => assert.deepEqual(bestaetigungsQuote([], new Set()).gesamt, { bestaetigt: 0, von: 0 }));
+
+console.log("Close-Pipeline bei Calendly-Buchung");
+const opp = (id, status_id, date_updated = "2026-10-01T00:00:00Z") => ({ id, status_id, date_updated });
+test("ohne Opportunity → anlegen (Setting terminiert), Lead-Status Setting", () =>
+  assert.deepEqual(pipelineFuerBuchung({ status_id: LEAD.interessiert, opportunities: [] }, "erstgespraech"), {
+    opp: "anlegen",
+    status: OPP.settingTerminiert,
+    leadStatus: LEAD.setting,
+  }));
+test("nur abgeschlossene Opportunity → neue anlegen (Closing terminiert)", () =>
+  assert.equal(pipelineFuerBuchung({ status_id: LEAD.setting, opportunities: [opp("o1", OPP.verloren)] }, "strategie").opp, "anlegen"));
+test("aktive Setting-Opp + Strategiegespräch → vorwärts auf Closing", () =>
+  assert.deepEqual(pipelineFuerBuchung({ status_id: LEAD.setting, opportunities: [opp("o1", OPP.settingTerminiert)] }, "strategie"), {
+    opp: "verschieben",
+    id: "o1",
+    status: OPP.closingTerminiert,
+    leadStatus: LEAD.closing,
+  }));
+test("No-Show → neu gebucht: gleicher Rang darf (Setting terminiert)", () =>
+  assert.equal(pipelineFuerBuchung({ status_id: LEAD.setting, opportunities: [opp("o1", OPP.settingNoShow)] }, "erstgespraech").opp, "verschieben"));
+test("Opp schon weiter (Closing) + Erstgespräch → nicht zurück, kein Lead-Status", () =>
+  assert.deepEqual(pipelineFuerBuchung({ status_id: LEAD.closing, opportunities: [opp("o1", OPP.closingTerminiert)] }, "erstgespraech"), {
+    opp: "schon_weiter",
+    id: "o1",
+    leadStatus: null,
+  }));
+test("Kunde: Lead-Status bleibt", () =>
+  assert.equal(pipelineFuerBuchung({ status_id: LEAD.kunde, opportunities: [] }, "strategie").leadStatus, null));
+test("mehrere aktive Opps → die zuletzt bearbeitete", () =>
+  assert.equal(
+    pipelineFuerBuchung(
+      { status_id: LEAD.setting, opportunities: [opp("alt", OPP.settingTerminiert, "2026-09-01T00:00:00Z"), opp("neu", OPP.settingFollowUp, "2026-10-10T00:00:00Z")] },
+      "strategie",
+    ).id,
+    "neu",
+  ));
 test("identische Daten → leerer Patch", () => {
   const z = zusammenfuehren(calendly, { ...calendly });
   assert.deepEqual(z.patch, {});

@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { adminPinZustand, istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { terminBasisUrl, waVerbindung, WA_ENV_PFLICHT, WA_ENV_WEITERE } from "@/lib/whatsapp/client";
 import { ladeEinstellungen } from "@/lib/whatsapp/einstellungen";
-import { formatDatum, formatUhrzeit } from "@/lib/whatsapp/logik";
+import { bestaetigungsQuote, formatDatum, formatUhrzeit, type QuoteWert, type TerminArt } from "@/lib/whatsapp/logik";
 import type { Termin } from "@/lib/whatsapp/termine";
 import { pruefeVorlage, VORLAGEN } from "@/lib/whatsapp/vorlagen";
 import {
@@ -24,6 +24,7 @@ import {
   vorlageSchalterAktion,
   calendlyWebhookAktion,
   closeFeldAktion,
+  closeStatusFeldAktion,
 } from "./actions";
 
 export const metadata: Metadata = { title: "WhatsApp-Bot" };
@@ -92,6 +93,44 @@ function Abschnitt({ titel, beschreibung, children, aktion }: {
   );
 }
 
+/** „68 %“ + „17 von 25“ — ohne zugestellte Buchungsnachricht „–“. */
+function QuoteKachel({ titel, wert }: { titel: string; wert: QuoteWert }) {
+  const prozent = wert.von ? Math.round((wert.bestaetigt / wert.von) * 100) : null;
+  return (
+    <div className="rounded-2xl border p-4">
+      <p className="text-sm text-muted-foreground">{titel}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight">{prozent === null ? "–" : `${prozent} %`}</p>
+      <p className="text-xs text-muted-foreground">
+        {wert.bestaetigt} von {wert.von} bestätigt
+      </p>
+    </div>
+  );
+}
+
+/** Termine der letzten 30 Tage und kommende + Schlüssel ihrer zugestellten/gelesenen Buchungsnachricht. */
+async function ladeQuote(svc: ReturnType<typeof createAdminClient>, jetzt: Date) {
+  const { data, error } = await svc
+    .from("wa_termine")
+    .select("id, art, status, bestaetigt_am")
+    .gte("start_at", new Date(jetzt.getTime() - 30 * 24 * 60 * 60_000).toISOString())
+    .neq("status", "abgesagt");
+  if (error) return null;
+  const termine = (data ?? []) as Array<{ id: string; art: TerminArt; status: string; bestaetigt_am: string | null }>;
+  const schluessel = termine.map((t) => `${t.id}|gebucht`);
+  const zugestellt = new Set<string>();
+  // In Blöcken abfragen (URL-Länge)
+  for (let i = 0; i < schluessel.length; i += 100) {
+    const { data: n, error: nFehler } = await svc
+      .from("wa_nachrichten")
+      .select("versand_schluessel")
+      .in("versand_schluessel", schluessel.slice(i, i + 100))
+      .in("status", ["zugestellt", "gelesen"]);
+    if (nFehler) return null;
+    for (const z of (n ?? []) as Array<{ versand_schluessel: string }>) zugestellt.add(z.versand_schluessel);
+  }
+  return bestaetigungsQuote(termine, zugestellt);
+}
+
 function StatusBadge({ status }: { status: string | null }) {
   const s = status ?? "nicht eingereicht";
   const farbe =
@@ -119,7 +158,7 @@ export default async function WhatsappBotPage({
   const verbindung = waVerbindung();
   const jetzt = new Date();
 
-  const [einstellungen, vorlagenRes, termineRes, nachrichtenRes] = await Promise.all([
+  const [einstellungen, vorlagenRes, termineRes, nachrichtenRes, quote] = await Promise.all([
     ladeEinstellungen(svc).catch(() => null),
     svc.from("wa_vorlagen").select("name, status, kategorie, ablehnungsgrund, geprueft_am"),
     svc
@@ -133,6 +172,7 @@ export default async function WhatsappBotPage({
       .select("id, richtung, telefon, typ, vorlage, body, status, fehler, created_at")
       .order("created_at", { ascending: false })
       .limit(100),
+    ladeQuote(svc, jetzt).catch(() => null),
   ]);
 
   if (!einstellungen) {
@@ -275,6 +315,21 @@ export default async function WhatsappBotPage({
       </div>
 
       <Abschnitt
+        titel="Bestätigungsquote"
+        beschreibung="Termine der letzten 30 Tage und kommende, deren Buchungsnachricht zugestellt wurde — davon bestätigt. Abgesagte zählen nicht."
+      >
+        {quote ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <QuoteKachel titel="Gesamt" wert={quote.gesamt} />
+            <QuoteKachel titel="Erstgespräch" wert={quote.erstgespraech} />
+            <QuoteKachel titel="Strategiegespräch" wert={quote.strategie} />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Quote nicht ladbar.</p>
+        )}
+      </Abschnitt>
+
+      <Abschnitt
         titel="Vorlagen"
         beschreibung="Nur eingeschaltete UND bei Meta freigegebene Vorlagen werden gesendet. Einreichen nur per Knopf."
         aktion={
@@ -370,6 +425,15 @@ export default async function WhatsappBotPage({
               disabled={gesperrt}
             />
           </label>
+          <label className="space-y-1 text-sm sm:col-span-2">
+            <span className="font-medium">Close-Feld für den Bestätigungsstatus</span>
+            <Input
+              name="close_status_feld"
+              defaultValue={einstellungen.close_status_feld ?? ""}
+              placeholder="custom.cf_… (Lead-Feld „WhatsApp-Termin“) — leer: Status wird nicht in Close geschrieben"
+              disabled={gesperrt}
+            />
+          </label>
           <div className="sm:col-span-2">
             <Button type="submit" size="sm" disabled={gesperrt}>
               Einstellungen speichern
@@ -380,12 +444,17 @@ export default async function WhatsappBotPage({
 
       <Abschnitt
         titel="Einrichtung"
-        beschreibung="Einmalig: Einwilligungsfeld in Close anlegen und Calendly-Buchungen an den Bot melden. Mehrfaches Klicken schadet nicht."
+        beschreibung="Einmalig: Einwilligungs- und Statusfeld in Close anlegen und Calendly-Buchungen an den Bot melden. Mehrfaches Klicken schadet nicht."
       >
         <div className="flex flex-wrap gap-2">
           <form action={closeFeldAktion}>
             <Button type="submit" size="sm" variant="outline" disabled={gesperrt}>
               Close-Feld anlegen
+            </Button>
+          </form>
+          <form action={closeStatusFeldAktion}>
+            <Button type="submit" size="sm" variant="outline" disabled={gesperrt}>
+              Close-Statusfeld anlegen
             </Button>
           </form>
           <form action={calendlyWebhookAktion}>

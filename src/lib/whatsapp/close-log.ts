@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ABGESCHLOSSEN, LEAD, OPP_TERMIN_AM_FELD, pipelineFuerBuchung, pipelineStand, type PipelineOpp } from "@/lib/close-pipeline";
 import { closeApi, closeUserName, type CloseUser } from "@/lib/integrations/close";
-import { berlinDatum, normalisiereTelefon } from "./logik";
+import { CLOSE_STATUS_WERTE, type CloseStatusWert } from "./einrichtung";
+import { ladeEinstellungen } from "./einstellungen";
+import { berlinDatum, firmenDomain, normalisiereTelefon, type TerminArt } from "./logik";
 
 const CLOSE_TIMEOUT_MS = 10_000;
 
@@ -11,8 +14,9 @@ function closeBot<T>(path: string, opts: Omit<NonNullable<Parameters<typeof clos
 
 /**
  * Close-Anbindung des WhatsApp-Terminbots: Notizen und Aufgaben am Lead,
- * Lead-Suche per E-Mail/Telefon. Notizen/Aufgaben laufen immer (auch wenn der
- * Bot aus ist) — sie gehen nur an das eigene Team, nie an den Lead.
+ * Lead-Suche per E-Mail/Telefon/Firmen-Domain, Lead/Opportunity zu Calendly-Buchungen,
+ * Statusfeld „WhatsApp-Termin“. Alles läuft immer (auch wenn der Bot aus ist) — es geht
+ * nur an das eigene Team bzw. ins CRM, nie an den Lead.
  */
 
 /** Notiz am Close-Lead (best effort — Fehler werden geworfen, Aufrufer fängt). */
@@ -99,11 +103,13 @@ export async function closeBenutzerPerEmail(svc: SupabaseClient, email: string |
 /**
  * Close-Lead zu E-Mail/Telefon finden (fehlertolerant, null wenn nichts eindeutig passt):
  * 1. Spiegel-Tabelle close_leads (Kontakt-E-Mails aus dem Close-Sync)
- * 2. Close-Suche, Treffer wird an den Kontaktdaten gegengeprüft
+ * 2. Close-Suche per E-Mail, dann per jeder Telefonnummer — Treffer wird an den Kontaktdaten gegengeprüft
+ * 3. Firmen-Domain der E-Mail (keine Freemail): nur wenn genau EIN Lead einen Kontakt mit
+ *    E-Mail „…@domain“ hat (Close-Suche `email:"domain"` findet auch Teiltreffer)
  */
 export async function findeCloseLead(
   svc: SupabaseClient,
-  { email, telefon }: { email?: string | null; telefon?: string | null },
+  { email, telefon, telefone }: { email?: string | null; telefon?: string | null; telefone?: string[] },
 ): Promise<string | null> {
   const mail = email?.trim().toLowerCase() || null;
   if (mail) {
@@ -120,28 +126,167 @@ export async function findeCloseLead(
     }
   }
 
-  const passt = (lead: CloseLeadDaten) =>
-    (lead.contacts ?? []).some(
-      (k) =>
-        (mail && (k.emails ?? []).some((e) => e.email?.toLowerCase() === mail)) ||
-        (telefon && (k.phones ?? []).some((p) => normalisiereTelefon(p.phone) === telefon)),
-    );
-
-  const suchen: string[] = [];
-  if (mail) suchen.push(`email:"${mail.replace(/"/g, "")}"`);
-  if (telefon) suchen.push(`phone:"${telefon}"`);
-  for (const query of suchen) {
+  const nummern = [...new Set([telefon, ...(telefone ?? [])].filter((t): t is string => !!t))];
+  const suche = async (query: string, limit = "5") => {
     try {
       const { data } = await closeBot<{ data: CloseLeadDaten[] }>("/lead/", {
-        params: { query, _fields: "id,contacts", _limit: "5" },
+        params: { query, _fields: "id,contacts", _limit: limit },
       });
-      const treffer = data.filter(passt);
-      if (treffer.length >= 1) return treffer[0].id;
+      return data;
     } catch (err) {
       console.error("[whatsapp] Close-Lead-Suche fehlgeschlagen:", err);
+      return [];
     }
+  };
+  const kontaktPasst = (lead: CloseLeadDaten, pruefe: (k: LeadKontakt) => boolean) => (lead.contacts ?? []).some(pruefe);
+
+  if (mail) {
+    const treffer = (await suche(`email:"${mail.replace(/"/g, "")}"`)).filter((l) =>
+      kontaktPasst(l, (k) => (k.emails ?? []).some((e) => e.email?.toLowerCase() === mail)),
+    );
+    if (treffer.length >= 1) return treffer[0].id;
+  }
+  for (const nummer of nummern) {
+    const treffer = (await suche(`phone:"${nummer}"`)).filter((l) =>
+      kontaktPasst(l, (k) => (k.phones ?? []).some((p) => normalisiereTelefon(p.phone) === nummer)),
+    );
+    if (treffer.length >= 1) return treffer[0].id;
+  }
+
+  const domain = firmenDomain(mail);
+  if (domain) {
+    const endung = `@${domain}`;
+    const treffer = (await suche(`email:"${domain}"`, "10")).filter((l) =>
+      kontaktPasst(l, (k) => (k.emails ?? []).some((e) => e.email?.trim().toLowerCase().endsWith(endung))),
+    );
+    // Mehrere Leads mit derselben Domain → nicht raten
+    if (treffer.length === 1) return treffer[0].id;
   }
   return null;
+}
+
+/**
+ * Neuen Close-Lead aus einer Calendly-Buchung anlegen (es gab keinen passenden).
+ * Name = Firma, sonst Personenname; Kontakt mit Name, E-Mail, Telefon (mobil);
+ * Lead-Status Setting (Erstgespräch) bzw. Closing (Strategiegespräch). Fehler werden geworfen.
+ */
+export async function legeCloseLeadAn(d: {
+  art: TerminArt;
+  name: string | null;
+  firma: string | null;
+  email: string | null;
+  telefon: string | null;
+}): Promise<string> {
+  const leadName = d.firma || d.name || d.email || d.telefon || "Calendly-Buchung";
+  const lead = await closeBot<{ id: string }>("/lead/", {
+    method: "POST",
+    body: {
+      name: leadName,
+      status_id: d.art === "strategie" ? LEAD.closing : LEAD.setting,
+      contacts: [
+        {
+          ...(d.name ? { name: d.name } : {}),
+          ...(d.email ? { emails: [{ email: d.email, type: "office" }] } : {}),
+          ...(d.telefon ? { phones: [{ phone: d.telefon, type: "mobile" }] } : {}),
+        },
+      ],
+    },
+  });
+  await notizSicher(lead.id, "Lead automatisch aus Calendly-Buchung angelegt");
+  return lead.id;
+}
+
+/**
+ * Calendly-Buchung in die Pipeline „Setter-Closer Hoffmann Solutions“ übernehmen:
+ * aktive Opportunity nur vorwärts bewegen bzw. neue anlegen (Termin am = Start, Zuständig =
+ * Gastgeber), Lead-Status Setting/Closing (nicht bei Kunde). Rückgabe: Opportunity-ID.
+ * Fehler werden geworfen (Aufrufer: best effort).
+ */
+export async function pipelineNachBuchung(d: {
+  leadId: string;
+  art: TerminArt;
+  startAt: string;
+  userId: string | null;
+}): Promise<{ oppId: string; aktion: string }> {
+  const lead = await closeBot<{ status_id: string; opportunities: PipelineOpp[] }>(`/lead/${d.leadId}/`, {
+    params: { _fields: "status_id,opportunities" },
+  });
+  const schritt = pipelineFuerBuchung({ status_id: lead.status_id, opportunities: lead.opportunities ?? [] }, d.art);
+  // Gleiches Format wie die Close-Automatik (Kalenderwert aus dem Protokoll): ISO-Zeitpunkt
+  const terminAm = new Date(d.startAt).toISOString();
+  const update: Record<string, unknown> = {
+    ...(schritt.opp === "schon_weiter" ? {} : { status_id: schritt.status }),
+    [OPP_TERMIN_AM_FELD]: terminAm,
+    ...(d.userId ? { user_id: d.userId } : {}),
+  };
+
+  let oppId: string;
+  if (schritt.opp === "anlegen") {
+    oppId = (await closeBot<{ id: string }>("/opportunity/", { method: "POST", body: { lead_id: d.leadId, ...update } })).id;
+  } else if (schritt.opp === "verschieben") {
+    await closeBot(`/opportunity/${schritt.id}/`, { method: "PUT", body: update });
+    oppId = schritt.id;
+  } else {
+    // Opportunity ist schon weiter (z. B. Closing) → Status und Termin bleiben
+    oppId = schritt.id;
+  }
+  if (schritt.leadStatus) {
+    await closeBot(`/lead/${d.leadId}/`, { method: "PUT", body: { status_id: schritt.leadStatus } });
+  }
+  return { oppId, aktion: schritt.opp };
+}
+
+/**
+ * Vom Bot angelegten Lead in den echten Lead zusammenführen (Close: POST /lead/merge/).
+ * Nie blockierend: Fehler → Log + Notiz am echten Lead. Danach Hinweis, falls der Lead
+ * jetzt zwei laufende Opportunities in der Pipeline hat (der Bot löscht nichts).
+ */
+export async function fuehreBotLeadZusammen(
+  svc: SupabaseClient,
+  z: { quelle: string; ziel: string; terminId: string },
+): Promise<boolean> {
+  try {
+    await closeBot("/lead/merge/", { method: "POST", body: { source: z.quelle, destination: z.ziel } });
+  } catch (err) {
+    const fehler = err instanceof Error ? err.message : String(err);
+    console.error("[whatsapp] Lead-Zusammenführung fehlgeschlagen:", err);
+    await svc.from("webhook_errors").insert({
+      endpoint: "whatsapp",
+      payload: { aktion: "lead_merge", source: z.quelle, destination: z.ziel, termin_id: z.terminId },
+      error: fehler,
+    });
+    await notizSicher(
+      z.ziel,
+      `Automatisch aus Calendly angelegter Lead ${z.quelle} konnte nicht zusammengeführt werden — bitte manuell zusammenführen.`,
+    );
+    return false;
+  }
+  await notizSicher(z.ziel, `Automatisch aus Calendly angelegten Lead ${z.quelle} mit diesem Lead zusammengeführt.`);
+  try {
+    const lead = await closeBot<{ opportunities: PipelineOpp[] }>(`/lead/${z.ziel}/`, { params: { _fields: "opportunities" } });
+    const laufend = pipelineStand(lead.opportunities ?? []).pipelineOpps.filter((o) => !ABGESCHLOSSEN.has(o.status_id));
+    if (laufend.length > 1) await notizSicher(z.ziel, "Achtung: Lead hat jetzt mehrere laufende Opportunities in der Pipeline — bitte prüfen.");
+  } catch (err) {
+    console.error("[whatsapp] Opportunities nach Zusammenführung nicht geprüft:", err);
+  }
+  return true;
+}
+
+/** Statusfeld „WhatsApp-Termin“ am Lead setzen (best effort, nur wenn das Feld eingerichtet ist). */
+export async function setzeCloseStatus(
+  svc: SupabaseClient,
+  leadId: string | null | undefined,
+  wert: CloseStatusWert,
+): Promise<void> {
+  if (!leadId) return;
+  try {
+    const feld = (await ladeEinstellungen(svc)).close_status_feld;
+    if (!feld) return;
+    const schluessel = feld.startsWith("custom.") ? feld : `custom.${feld}`;
+    await closeBot(`/lead/${leadId}/`, { method: "PUT", body: { [schluessel]: wert } });
+  } catch (err) {
+    console.error("[whatsapp] Close-Statusfeld nicht gesetzt:", err);
+  }
 }
 
 /** Wert eines Close-Feldes: "custom.cf_…", "cf_…" oder Feldname (aus lead.custom). */
@@ -159,4 +304,26 @@ export function istJa(wert: unknown): boolean {
   if (wert === true) return true;
   if (Array.isArray(wert)) return wert.some(istJa);
   return typeof wert === "string" && wert.trim().toLowerCase() === "ja";
+}
+
+/**
+ * Meta meldet per Status-Webhook „failed“: Notiz am Lead („WhatsApp nicht zugestellt: …“) und
+ * Statusfeld „Nicht zugestellt“ — Letzteres nur für Vorlagen und nicht bei bestätigten Terminen.
+ * Best effort, wirft nie.
+ */
+export async function meldeNichtZugestellt(
+  svc: SupabaseClient,
+  n: { closeLeadId: string | null; terminId: string | null; typ: string | null; vorlage: string | null; fehler: string },
+): Promise<void> {
+  try {
+    await notizSicher(n.closeLeadId, `WhatsApp nicht zugestellt: ${n.vorlage ?? n.typ ?? "Nachricht"} – ${n.fehler}`);
+    if (!n.closeLeadId || n.typ !== "template") return;
+    if (n.terminId) {
+      const { data } = await svc.from("wa_termine").select("bestaetigt_am").eq("id", n.terminId).maybeSingle();
+      if ((data as { bestaetigt_am: string | null } | null)?.bestaetigt_am) return;
+    }
+    await setzeCloseStatus(svc, n.closeLeadId, CLOSE_STATUS_WERTE.nichtZugestellt);
+  } catch (err) {
+    console.error("[whatsapp] Zustellfehler nicht an Close gemeldet:", err);
+  }
 }

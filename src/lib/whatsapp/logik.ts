@@ -324,13 +324,64 @@ export interface TerminKern {
   quelle: "calendly" | "close";
   start_at: string;
   close_lead_id?: string | null;
+  close_user_id?: string | null;
   telefon?: string | null;
   email?: string | null;
 }
 
 export const ZUSAMMENFUEHREN_FENSTER_MS = 30 * MIN;
+/** Gleicher Gastgeber ohne gemeinsamen Lead: nur bei fast gleichem Start derselbe Termin. */
+export const GASTGEBER_FENSTER_MS = 5 * MIN;
 
-/** Gleicher Lead (Close-Lead, Telefon oder E-Mail), gleiche Art, Start ±30 Min. */
+/** Freemail-Anbieter: Domain sagt nichts über die Firma aus (kein Abgleich per Domain). */
+export const FREEMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "gmx.de",
+  "gmx.net",
+  "gmx.at",
+  "gmx.ch",
+  "web.de",
+  "t-online.de",
+  "outlook.com",
+  "outlook.de",
+  "hotmail.com",
+  "hotmail.de",
+  "yahoo.com",
+  "yahoo.de",
+  "icloud.com",
+  "me.com",
+  "aol.com",
+  "freenet.de",
+  "posteo.de",
+  "mail.de",
+  "online.de",
+  "live.de",
+  "live.com",
+  "protonmail.com",
+  "proton.me",
+]);
+
+/** Domain einer E-Mail in Kleinbuchstaben ("J.Acar@AlphaKlima.de" → "alphaklima.de"). */
+export function emailDomain(email: string | null | undefined): string | null {
+  const t = (email ?? "").trim().toLowerCase();
+  const at = t.lastIndexOf("@");
+  if (at < 1) return null;
+  const domain = t.slice(at + 1);
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain) ? domain : null;
+}
+
+/** Firmen-Domain einer E-Mail — null bei Freemail-Adressen. */
+export function firmenDomain(email: string | null | undefined): string | null {
+  const d = emailDomain(email);
+  return d && !FREEMAIL_DOMAINS.has(d) ? d : null;
+}
+
+/**
+ * Gleiche Art, Start ±30 Min. und gleicher Lead: Close-Lead, Telefon, E-Mail oder
+ * Firmen-Domain der E-Mail (keine Freemail). Zusätzlich: gleicher Gastgeber (close_user_id),
+ * Start ±5 Min. und mindestens einem Termin fehlt der Close-Lead.
+ */
 export function istGleicherTermin(a: TerminKern, b: TerminKern): boolean {
   if (a.art !== b.art) return false;
   const diff = Math.abs(new Date(a.start_at).getTime() - new Date(b.start_at).getTime());
@@ -338,6 +389,16 @@ export function istGleicherTermin(a: TerminKern, b: TerminKern): boolean {
   if (a.close_lead_id && b.close_lead_id && a.close_lead_id === b.close_lead_id) return true;
   if (a.telefon && b.telefon && a.telefon === b.telefon) return true;
   if (a.email && b.email && a.email.trim().toLowerCase() === b.email.trim().toLowerCase()) return true;
+  const domainA = firmenDomain(a.email);
+  if (domainA && domainA === firmenDomain(b.email)) return true;
+  if (
+    a.close_user_id &&
+    a.close_user_id === b.close_user_id &&
+    diff <= GASTGEBER_FENSTER_MS &&
+    (!a.close_lead_id || !b.close_lead_id)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -365,6 +426,8 @@ export const TERMIN_FELDER = [
 
 export type TerminDaten = TerminKern & Partial<Record<(typeof TERMIN_FELDER)[number], string | null>> & {
   opt_in?: boolean;
+  /** Close-Lead wurde vom Bot aus der Calendly-Buchung angelegt */
+  close_lead_angelegt?: boolean;
 };
 
 export interface ZusammenfuehrErgebnis {
@@ -375,6 +438,8 @@ export interface ZusammenfuehrErgebnis {
   bestaetigungZuruecksetzen: boolean;
   /** Einwilligung neu gewonnen (false → true) */
   optInGewonnen: boolean;
+  /** Vom Bot angelegten Close-Lead in den echten Lead (aus dem Close-Protokoll) zusammenführen */
+  leadZusammenfuehren: { quelle: string; ziel: string } | null;
 }
 
 /** Gleiche Quelle: ab dieser Abweichung gilt eine Startänderung als Verschiebung. */
@@ -392,6 +457,9 @@ export const VERSCHIEBUNG_ANDERE_QUELLE_MS = 15 * MIN;
  * - gleicheQuelle = Treffer über calendly_event_uri bzw. close_protokoll_id.
  * - Hat der Termin eine Calendly-Buchung, überschreibt Close nie Start, Kontaktdaten oder
  *   opt_in (ein true bleibt) — Close füllt dann nur Lücken.
+ * - Close-Lead: der Lead aus dem Close-Protokoll gewinnt. Hat der Bot für die Calendly-Buchung
+ *   einen eigenen Lead angelegt (close_lead_angelegt) und das Protokoll nennt einen anderen,
+ *   wird der Termin auf den Protokoll-Lead umgestellt und leadZusammenfuehren gesetzt.
  */
 export function zusammenfuehren(
   bestehend: TerminDaten,
@@ -411,6 +479,23 @@ export function zusammenfuehren(
     if (ueberschreiben || alt === undefined || alt === null || alt === "") patch[feld] = wert;
   }
   if (neu.quelle === "calendly" && bestehend.quelle !== "calendly") patch.quelle = "calendly";
+
+  // Close-Lead: Protokoll gewinnt gegen einen per Calendly gefundenen bzw. vom Bot angelegten Lead
+  let leadZusammenfuehren: ZusammenfuehrErgebnis["leadZusammenfuehren"] = null;
+  const altLead = bestehend.close_lead_id || null;
+  const neuLead = neu.close_lead_id || null;
+  if (altLead && neuLead && altLead !== neuLead) {
+    if (neu.quelle === "close" && bestehend.quelle === "calendly" && !bestehend.close_protokoll_id) {
+      patch.close_lead_id = neuLead;
+      if (bestehend.close_lead_angelegt) {
+        patch.close_lead_angelegt = false;
+        leadZusammenfuehren = { quelle: altLead, ziel: neuLead };
+      }
+    } else if (neu.quelle === "calendly" && bestehend.close_protokoll_id) {
+      delete patch.close_lead_id;
+      if (neu.close_lead_angelegt) leadZusammenfuehren = { quelle: neuLead, ziel: altLead };
+    }
+  }
 
   // Einwilligung an die Telefonnummer binden
   const altOptIn = !!bestehend.opt_in;
@@ -432,6 +517,7 @@ export function zusammenfuehren(
     startGeaendert: diff > 0,
     bestaetigungZuruecksetzen: diff > grenze,
     optInGewonnen: optIn && !altOptIn,
+    leadZusammenfuehren,
   };
 }
 
@@ -548,4 +634,44 @@ const OHNE_INHALT = new Set(["reaction", "system", "unsupported", "unknown", "ep
 
 export function istOhneInhalt(typ: string): boolean {
   return OHNE_INHALT.has(typ);
+}
+
+// ---------------------------------------------------------------------------
+// Bestätigungsquote (Dashboard)
+// ---------------------------------------------------------------------------
+
+export interface QuoteWert {
+  bestaetigt: number;
+  von: number;
+}
+
+export interface BestaetigungsQuote {
+  gesamt: QuoteWert;
+  erstgespraech: QuoteWert;
+  strategie: QuoteWert;
+}
+
+/**
+ * Anteil bestätigter Termine an den Terminen, deren Buchungsnachricht („gebucht“) zugestellt
+ * bzw. gelesen wurde. zugestellt = versand_schluessel der Nachrichten mit Status zugestellt/gelesen.
+ * Abgesagte Termine zählen nicht mit.
+ */
+export function bestaetigungsQuote(
+  termine: Array<{ id: string; art: TerminArt; status: string; bestaetigt_am: string | null }>,
+  zugestellt: Set<string>,
+): BestaetigungsQuote {
+  const q: BestaetigungsQuote = {
+    gesamt: { bestaetigt: 0, von: 0 },
+    erstgespraech: { bestaetigt: 0, von: 0 },
+    strategie: { bestaetigt: 0, von: 0 },
+  };
+  for (const t of termine) {
+    if (t.status === "abgesagt") continue;
+    if (!zugestellt.has(`${t.id}|gebucht`)) continue;
+    for (const w of [q.gesamt, q[t.art]]) {
+      w.von++;
+      if (t.bestaetigt_am) w.bestaetigt++;
+    }
+  }
+  return q;
 }
