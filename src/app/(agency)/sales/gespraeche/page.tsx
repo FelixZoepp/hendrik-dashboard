@@ -295,7 +295,7 @@ export default async function GespraechePage({
       {/* Status-Hinweise */}
       <section className="fern-card space-y-1.5 p-5 text-sm">
         <p>
-          Ausgewertet werden Setting, Closing und Opening-Calls ab {minSek} s (Fireflies-Budget). Kürzere Openings zählen nur in der Statistik.
+          Ausgewertet werden nur Setting- und Closing-Calls. Openings zählen nur in der Statistik.
         </p>
         <p className="text-muted-foreground">
           Im Zeitraum übersprungen: {nUebersprungen} · wartend auf Upload: {nNeu.count ?? 0} · bei Fireflies: {nHoch.count ?? 0} · transkribiert, noch

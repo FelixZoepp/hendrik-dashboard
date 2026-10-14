@@ -116,11 +116,11 @@ export function istWichtig(
   g: { phase: Phase; dauer_sek: number | null },
   openingMinSek = OPENING_MIN_SEK,
 ): { wichtig: true } | { wichtig: false; grund: string } {
+  // Entscheidung Felix 14.10.: nur Settings und Closings zu Fireflies — Openings nie (nur Statistik)
+  void openingMinSek;
   if (g.phase === "setting" || g.phase === "closing") return { wichtig: true };
-  if (g.phase === "opening") {
-    return (g.dauer_sek ?? 0) >= openingMinSek ? { wichtig: true } : { wichtig: false, grund: `unwichtig: Opening < ${openingMinSek} s` };
-  }
-  return { wichtig: false, grund: "unwichtig: kein Opening/Setting/Closing" };
+  if (g.phase === "opening") return { wichtig: false, grund: "Opening: wird nicht transkribiert" };
+  return { wichtig: false, grund: "unwichtig: kein Setting/Closing" };
 }
 
 const RANG: Record<Phase, number> = { closing: 0, setting: 1, opening: 2, sonstiges: 3 };

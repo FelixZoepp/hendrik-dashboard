@@ -103,11 +103,10 @@ console.log("Wichtigkeit und Upload-Reihenfolge");
 test("istWichtig: Setting/Closing immer, Opening ab Mindestdauer, Sonstiges nie", () => {
   assert.equal(istWichtig({ phase: "setting", dauer_sek: 16 }).wichtig, true);
   assert.equal(istWichtig({ phase: "closing", dauer_sek: 20 }).wichtig, true);
-  assert.equal(istWichtig({ phase: "opening", dauer_sek: 60 }).wichtig, true);
+  assert.equal(istWichtig({ phase: "opening", dauer_sek: 600 }).wichtig, false);
   const kurz = istWichtig({ phase: "opening", dauer_sek: 59 });
   assert.equal(kurz.wichtig, false);
-  assert.equal(kurz.grund, "unwichtig: Opening < 60 s");
-  assert.equal(istWichtig({ phase: "opening", dauer_sek: 59 }, 45).wichtig, true);
+  assert.equal(kurz.grund, "Opening: wird nicht transkribiert");
   assert.equal(istWichtig({ phase: "sonstiges", dauer_sek: 900 }).wichtig, false);
 });
 test("uploadPrioritaet: Closing > Setting > Opening; Opening längste zuerst; sonst älteste zuerst", () => {

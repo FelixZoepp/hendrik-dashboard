@@ -15,7 +15,7 @@ import {
 /**
  * Close-Telefonate der letzten 2 Tage → Tabelle gespraeche (idempotent, nur neue Calls).
  * Alle angenommenen Calls mit Aufnahme ≥ 15 s werden für die Statistik gespeichert;
- * hochgeladen werden nur wichtige (Setting, Closing, Opening ab 60 s), der Rest ist „uebersprungen“.
+ * hochgeladen werden nur Setting- und Closing-Calls, der Rest ist „uebersprungen“.
  * Close wird nur gelesen.
  */
 
