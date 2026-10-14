@@ -101,6 +101,15 @@ const imZeitraum = (iso: string, z: Zeitraum) => {
   return t >= z.von.getTime() && t < z.bis.getTime();
 };
 
+/** „ · 2 noch ohne Protokoll“, wenn geplante Termine kein Ergebnis haben */
+const ohneProtokoll = (x: { geplant: number; protokolliert: number }) =>
+  x.geplant > x.protokolliert ? ` · ${x.geplant - x.protokolliert} noch ohne Protokoll` : "";
+
+/** Anzeigenamen für Close-Benutzer ohne gepflegten Namen */
+const NAMEN: Record<string, string> = {
+  user_8aTaFHt8ibP9z2u36XGGebbMVGJpqKcaUgpV78UMAwl: "Renney",
+};
+
 const prozent = (teil: number, von: number) => (von ? `${Math.round((teil / von) * 100)} %` : "–");
 const minuten = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} Std. ${Math.round((s % 3600) / 60)} Min.` : `${Math.round(s / 60)} Min.`);
 
@@ -138,10 +147,11 @@ function letzteJeLead(protokolle: Protokoll[], typ: string): Protokoll[] {
  * Ergebnisse aus „Nächster Schritt“. Rein, testbar.
  */
 export function terminStatistik(protokolle: Protokoll[], termine: Array<{ art: string }>) {
-  const setting = letzteJeLead(protokolle, PROTOKOLL.setting);
-  const closing = letzteJeLead(protokolle, PROTOKOLL.closing);
   const sWert = (p: Protokoll) => p[ERGEBNIS_FELD[PROTOKOLL.setting]];
   const cWert = (p: Protokoll) => p[ERGEBNIS_FELD[PROTOKOLL.closing]];
+  // Nur Protokolle mit Ergebnis („Nächster Schritt“) — Notizen ohne Ergebnis zählen nicht als Termin
+  const setting = letzteJeLead(protokolle, PROTOKOLL.setting).filter((p) => !!sWert(p));
+  const closing = letzteJeLead(protokolle, PROTOKOLL.closing).filter((p) => !!cWert(p));
   const sErschienen = setting.filter((p) => sWert(p) !== "No-Show");
   const cErschienen = closing.filter((p) => cWert(p) !== "No SHow");
   const nUnqualifiziert = sErschienen.filter((p) => sWert(p) === "Nicht qualifiziert" || sWert(p) === "Disqualifiziert").length;
@@ -187,7 +197,7 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
       .lt("scheduled_at", z.bis.toISOString())
       .eq("status", "active"),
   ]);
-  const name = new Map(users.map((u) => [u.id, closeUserName(u)]));
+  const name = new Map(users.map((u) => [u.id, NAMEN[u.id] ?? closeUserName(u)]));
   const wer = (id: string | null) => (id ? name.get(id) ?? "Unbekannt" : "Unbekannt");
 
   // Anwahlen = ausgehende Anrufe; erreicht = angenommen
@@ -264,8 +274,8 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
     `📝 *Protokolle:* ${fertig.length} – Cold Call ${anzahl(PROTOKOLL.coldCall)} · Setting ${anzahl(PROTOKOLL.setting)} · Closing ${anzahl(PROTOKOLL.closing)}`,
     `🎯 *Ergebnisse:* ${erfolge.map((e) => `${e.label} ${e.n}`).join(" · ")}`,
     " ",
-    `🤝 *Settings:* ${ts.setting.geplant} geplant · ${ts.setting.protokolliert} protokolliert · *${ts.setting.erschienen} erschienen* (${prozent(ts.setting.erschienen, ts.setting.protokolliert)}, No-Show ${ts.setting.noShow}) · ${ts.setting.qualifiziert} qualifiziert · *${ts.setting.closingGelegt} zum Closing gelegt*${ts.setting.followUp ? ` · ${ts.setting.followUp} Follow-Up` : ""}`,
-    `💼 *Closings:* ${ts.closing.geplant} geplant · ${ts.closing.protokolliert} protokolliert · *${ts.closing.erschienen} erschienen* (${prozent(ts.closing.erschienen, ts.closing.protokolliert)}, No-Show ${ts.closing.noShow}) · *${ts.closing.geclosed} geclosed* (${prozent(ts.closing.geclosed, ts.closing.erschienen)})${ts.closing.cc2 ? ` · ${ts.closing.cc2} CC2` : ""}${ts.closing.angebot ? ` · ${ts.closing.angebot} Angebot` : ""}`,
+    `🤝 *Settings:* ${ts.setting.geplant} geplant · *${ts.setting.erschienen} erschienen* (${prozent(ts.setting.erschienen, Math.max(ts.setting.geplant, ts.setting.protokolliert))}) · ${ts.setting.noShow} No-Show${ohneProtokoll(ts.setting)} · ${ts.setting.qualifiziert} qualifiziert · *${ts.setting.closingGelegt} zum Closing gelegt*${ts.setting.followUp ? ` · ${ts.setting.followUp} Follow-Up` : ""}`,
+    `💼 *Closings:* ${ts.closing.geplant} geplant · *${ts.closing.erschienen} erschienen* (${prozent(ts.closing.erschienen, Math.max(ts.closing.geplant, ts.closing.protokolliert))}) · ${ts.closing.noShow} No-Show${ohneProtokoll(ts.closing)} · *${ts.closing.geclosed} geclosed* (${prozent(ts.closing.geclosed, ts.closing.erschienen)})${ts.closing.cc2 ? ` · ${ts.closing.cc2} CC2` : ""}${ts.closing.angebot ? ` · ${ts.closing.angebot} Angebot` : ""}`,
     `✅ *Termine bestätigt (WhatsApp):* ${bestaetigt.length} von ${angeschrieben.length} (${prozent(bestaetigt.length, angeschrieben.length)}) – Erstgespräch ${quoteArt("erstgespraech")} · Strategie ${quoteArt("strategie")}${termine.length > angeschrieben.length ? ` · ${termine.length - angeschrieben.length} Termin(e) ohne zugestellte WhatsApp` : ""}`,
     ...(team.length ? [" ", "*Team*", ...team] : []),
   ];
