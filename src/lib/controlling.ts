@@ -3,7 +3,7 @@
 
 import { categorizeCancelReason } from "@/lib/sales-utils";
 import { berlinDateString, berlinDayStart, type Period } from "@/lib/period-utils";
-import { PROTOKOLL } from "@/lib/close-team";
+import { NAMEN, PROTOKOLL } from "@/lib/close-team";
 
 // ---------------------------------------------------------------------------
 // Eingangsdaten
@@ -591,7 +591,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
       openerMap.get(g.userId) ??
       {
         userId: g.userId,
-        name: input.users.find((u) => u.close_id === g.userId)?.name ?? "Unbekannt",
+        name: NAMEN[g.userId] ?? input.users.find((u) => u.close_id === g.userId)?.name ?? "Unbekannt",
         termineGelegt: 0, stattgefunden: 0, noShow: 0, offen: 0, showRate: null, closingsGelegt: 0, deals: 0, umsatz: 0,
       };
     z.termineGelegt++;
