@@ -9,6 +9,7 @@ import {
   buildReport,
   type CCall,
   type CEvent,
+  type CProtokoll,
   type CMeta,
   type COpp,
   type CSync,
@@ -40,7 +41,7 @@ export default async function SalesPage({
     return c ?? null;
   };
 
-  const [users, opps, calls, events, meta, syncsRes, leadsNew, leadsNewPrev, dbTotals, closeTotals] =
+  const [users, opps, calls, events, protokolle, meta, syncsRes, leadsNew, leadsNewPrev, dbTotals, closeTotals] =
     await Promise.all([
       fetchAll<CUser>(() => supabase.from("close_users").select("close_id, name, email").order("close_id")),
       fetchAll<COpp>(() =>
@@ -64,6 +65,13 @@ export default async function SalesPage({
           .gte("scheduled_at", loadFrom)
           .lte("scheduled_at", addDays(now, 60).toISOString())
           .order("calendly_uri")
+      ),
+      fetchAll<CProtokoll>(() =>
+        supabase
+          .from("close_custom_activities")
+          .select("lead_id, user_id, custom_activity_type_id, date_created, fields", { count: "exact" })
+          .gte("date_created", loadFrom)
+          .order("close_id")
       ),
       fetchAll<CMeta>(() =>
         supabase
@@ -99,6 +107,7 @@ export default async function SalesPage({
     opps,
     calls,
     events,
+    protokolle,
     meta,
     leadsNew: leadsNew ?? 0,
     leadsNewPrev,

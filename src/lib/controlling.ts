@@ -3,6 +3,7 @@
 
 import { categorizeCancelReason } from "@/lib/sales-utils";
 import { berlinDateString, berlinDayStart, type Period } from "@/lib/period-utils";
+import { PROTOKOLL } from "@/lib/close-team";
 
 // ---------------------------------------------------------------------------
 // Eingangsdaten
@@ -68,12 +69,28 @@ export interface CSync {
   error: string | null;
 }
 
+/** Close-Gesprächsprotokoll (close_custom_activities), Felder als "custom.cf_…" */
+export interface CProtokoll {
+  lead_id: string;
+  user_id: string | null;
+  custom_activity_type_id: string;
+  date_created: string;
+  fields: Record<string, unknown> | null;
+}
+
+/** Feld „Nächster Schritt“ je Protokolltyp und der Wert für No-Show (so in Close gepflegt) */
+const PROTOKOLL_ERGEBNIS = {
+  erst: { typ: PROTOKOLL.setting, feld: "custom.cf_6Kt9RVMkQiuDOXBiiTRrKg8DTwvoQn8EEBCXmaTykGZ", noShow: "No-Show" },
+  strategie: { typ: PROTOKOLL.closing, feld: "custom.cf_9vkQK8YANMMZ3lyt0aAZbAnkAxYoB15WwM5sTyr3veM", noShow: "No SHow" },
+} as const;
+
 export interface ControllingInput {
   period: Period;
   users: CUser[];
   opps: COpp[]; // alle Opportunities
   calls: CCall[]; // Calls ab prevStart (bzw. periodStart)
   events: CEvent[]; // Calendly ab prevStart bis +60 Tage
+  protokolle: CProtokoll[]; // Close-Protokolle ab prevStart
   meta: CMeta[]; // ab prevStart
   leadsNew: number;
   leadsNewPrev: number | null;
@@ -262,7 +279,10 @@ export interface ControllingReport {
     anrufe: Kpi;
     leadsAngerufen: number;
     leadsErreicht: number;
-    termine: Record<"erst" | "strategie", { neu: Kpi; geplant: number; stattgefunden: Kpi; noShow: number; abgesagt: number; showRate: number | null }>;
+    termine: Record<
+      "erst" | "strategie",
+      { neu: Kpi; geplant: number; stattgefunden: Kpi; noShow: number; abgesagt: number; ohneProtokoll: number; showRate: number | null }
+    >;
     showRateErst: Kpi;
     onboardings: Kpi;
   };
@@ -272,6 +292,8 @@ export interface ControllingReport {
   team: TeamZeile[];
   termine: TerminZeile[];
   absagegruende: { grund: string; anzahl: number }[];
+  /** Ergebnisse („Nächster Schritt“) der Close-Protokolle im Zeitraum, je Lead das letzte */
+  protokollErgebnisse: Record<"erst" | "strategie", { wert: string; anzahl: number; noShow: boolean }[]>;
   absagenVorlauf: { ueber24h: number; unter24h: number; unter2h: number };
   kommend: { name: string; typ: string; start: string }[];
   heatmapAnrufe: { tag: number; stunde: number; count: number }[];
@@ -333,8 +355,6 @@ export function buildReport(input: ControllingInput): ControllingReport {
   const umsatzPrev = sum(wonPrev, (o) => o.value ?? 0);
   const adSpend = sum(meta, (m) => Number(m.spend));
   const adSpendPrev = sum(metaPrev, (m) => Number(m.spend));
-  const strategieShows = byTyp(events, "strategie").filter(isShow).length;
-  const strategieShowsPrev = byTyp(eventsPrev, "strategie").filter(isShow).length;
   const erst = byTyp(events, "erst");
   const erstPrev = byTyp(eventsPrev, "erst");
   const erstVergangen = erst.filter((e) => e.status === "active");
@@ -342,17 +362,42 @@ export function buildReport(input: ControllingInput): ControllingReport {
   const pv = <T>(v: T) => (hasPrev ? v : null);
   const neuGebucht = (t: TerminTyp, from: Date, to: Date) =>
     input.events.filter((e) => e.created_at && inRange(e.created_at, from, to) && terminTyp(e.event_type_name) === t).length;
+  // Stattgefunden/No-Show kommen aus den Close-Protokollen (Calendly-No-Shows pflegt niemand), Absagen aus Calendly
+  const ergebnisse = (t: "erst" | "strategie", from: Date, to: Date) => {
+    const { typ, feld, noShow } = PROTOKOLL_ERGEBNIS[t];
+    const jeLead = new Map<string, CProtokoll>();
+    for (const p of input.protokolle) {
+      if (p.custom_activity_type_id !== typ || !p.fields?.[feld] || !inRange(p.date_created, from, to)) continue;
+      const alt = jeLead.get(p.lead_id);
+      if (!alt || alt.date_created < p.date_created) jeLead.set(p.lead_id, p);
+    }
+    const werte = [...jeLead.values()].map((p) => String(p.fields![feld]));
+    return { werte, noShow: werte.filter((w) => w === noShow).length, erschienen: werte.filter((w) => w !== noShow).length };
+  };
   const terminKpi = (t: "erst" | "strategie") => {
     const geplant = byTyp(events, t);
-    const nichtAbgesagt = geplant.filter((e) => e.status === "active");
+    const e = ergebnisse(t, periodStart, now);
+    const ePrev = hasPrev ? ergebnisse(t, prevStart!, prevEnd!) : null;
+    const nichtAbgesagt = geplant.filter((x) => x.status === "active").length;
     return {
       neu: { value: neuGebucht(t, periodStart, now), prev: hasPrev ? neuGebucht(t, prevStart!, prevEnd!) : null },
       geplant: geplant.length,
-      stattgefunden: { value: geplant.filter(isShow).length, prev: pv(byTyp(eventsPrev, t).filter(isShow).length) },
-      noShow: geplant.filter((e) => e.no_show).length,
-      abgesagt: geplant.filter((e) => e.status === "canceled").length,
-      showRate: ratio(nichtAbgesagt.filter(isShow).length, nichtAbgesagt.length),
+      stattgefunden: { value: e.erschienen, prev: ePrev ? ePrev.erschienen : null },
+      noShow: e.noShow,
+      abgesagt: geplant.filter((x) => x.status === "canceled").length,
+      ohneProtokoll: Math.max(0, nichtAbgesagt - e.erschienen - e.noShow),
+      showRate: ratio(e.erschienen, e.erschienen + e.noShow),
     };
+  };
+  const terminKpis = { erst: terminKpi("erst"), strategie: terminKpi("strategie") };
+  const zaehle = (werte: string[], noShow: string) => {
+    const m = new Map<string, number>();
+    for (const w of werte) m.set(w, (m.get(w) ?? 0) + 1);
+    return [...m.entries()].map(([wert, anzahl]) => ({ wert, anzahl, noShow: wert === noShow })).sort((a, b) => b.anzahl - a.anzahl);
+  };
+  const protokollErgebnisse = {
+    erst: zaehle(ergebnisse("erst", periodStart, now).werte, PROTOKOLL_ERGEBNIS.erst.noShow),
+    strategie: zaehle(ergebnisse("strategie", periodStart, now).werte, PROTOKOLL_ERGEBNIS.strategie.noShow),
   };
 
   const kpis: ControllingReport["kpis"] = {
@@ -363,8 +408,8 @@ export function buildReport(input: ControllingInput): ControllingReport {
     pipelineAnzahl: aktiv.length,
     forecast: sum(aktiv, (o) => ((o.value ?? 0) * (o.confidence ?? 0)) / 100),
     closingRate: {
-      value: ratio(won.length, strategieShows),
-      prev: pv(ratio(wonPrev.length, strategieShowsPrev)),
+      value: ratio(won.length, terminKpis.strategie.stattgefunden.value ?? 0),
+      prev: pv(ratio(wonPrev.length, terminKpis.strategie.stattgefunden.prev ?? 0)),
     },
     adSpend: { value: adSpend, prev: pv(adSpendPrev) },
     cac: { value: ratio(adSpend, won.length), prev: pv(ratio(adSpendPrev, wonPrev.length)) },
@@ -373,7 +418,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
     anrufe: { value: calls.length, prev: pv(callsPrev.length) },
     leadsAngerufen: uniqueLeads(calls),
     leadsErreicht: uniqueLeads(calls.filter(isReached)),
-    termine: { erst: terminKpi("erst"), strategie: terminKpi("strategie") },
+    termine: terminKpis,
     showRateErst: {
       value: ratio(erstVergangen.filter(isShow).length, erstVergangen.length),
       prev: pv(ratio(erstVergangenPrev.filter(isShow).length, erstVergangenPrev.length)),
@@ -391,9 +436,9 @@ export function buildReport(input: ControllingInput): ControllingReport {
     { key: "erreicht", label: "Leads erreicht", count: uniqueLeads(calls.filter(isReached)) },
     { key: "gespraech", label: "Leads mit Gespräch > 1 min", count: uniqueLeads(calls.filter(isConversation)) },
     { key: "erstGebucht", label: "Erstgespräch geplant", hint: "Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht", count: erst.length },
-    { key: "erstShow", label: "Erstgespräch stattgefunden", count: erst.filter(isShow).length },
+    { key: "erstShow", label: "Erstgespräch stattgefunden", hint: "laut Setting-Protokoll in Close", count: terminKpis.erst.stattgefunden.value ?? 0 },
     { key: "stratGebucht", label: "Strategie geplant", hint: "Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht", count: byTyp(events, "strategie").length },
-    { key: "stratShow", label: "Strategie stattgefunden", count: strategieShows },
+    { key: "stratShow", label: "Strategie stattgefunden", hint: "laut Closing-Protokoll in Close", count: terminKpis.strategie.stattgefunden.value ?? 0 },
     {
       key: "onboarding",
       label: "Onboarding",
@@ -539,8 +584,8 @@ export function buildReport(input: ControllingInput): ControllingReport {
           (e) => e.created_at && inRange(e.created_at, periodStart, now) && terminTyp(e.event_type_name) === typ,
         ).length,
         geplant: es.length,
-        stattgefunden: es.filter(isShow).length,
-        noShow: es.filter((e) => e.no_show).length,
+        stattgefunden: typ === "erst" || typ === "strategie" ? terminKpis[typ].stattgefunden.value ?? 0 : es.filter(isShow).length,
+        noShow: typ === "erst" || typ === "strategie" ? terminKpis[typ].noShow : es.filter((e) => e.no_show).length,
         abgesagt: es.filter((e) => e.status === "canceled").length,
         offen: byTyp(kommendeEvents, typ).length,
         showRate: ratio(vergangen.filter(isShow).length, vergangen.length),
@@ -655,6 +700,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
     pipeline,
     team,
     termine,
+    protokollErgebnisse,
     absagegruende: [...gruende.entries()].map(([grund, anzahl]) => ({ grund, anzahl })).sort((a, b) => b.anzahl - a.anzahl),
     absagenVorlauf,
     kommend: kommendeEvents.slice(0, 6).map((e) => ({

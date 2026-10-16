@@ -260,7 +260,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
               label={`${name} stattgefunden`}
               value={num(t.stattgefunden.value)}
               kpi={t.stattgefunden}
-              hint={`von ${num(t.geplant)} geplant · ${num(t.noShow)} No-Show · ${num(t.abgesagt)} abgesagt · Show-Rate ${pct(t.showRate)}`}
+              hint={`laut Close · ${num(t.noShow)} No-Show · ${num(t.abgesagt)} abgesagt${t.ohneProtokoll ? ` · ${num(t.ohneProtokoll)} ohne Protokoll` : ""} · Show-Rate ${pct(t.showRate)} · ${num(t.geplant)} geplant`}
             />,
           ];
         })}
@@ -447,7 +447,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
         <TabsContent value="termine" className="mt-4 space-y-4">
           <Section
             title="Termine nach Typ"
-            subtitle="Neu gebucht = Buchung im Zeitraum · Geplant = Termin im Zeitraum (davon stattgefunden, No-Show, abgesagt) · Show-Rate = stattgefunden / nicht abgesagte, vergangene Termine"
+            subtitle="Neu gebucht = Buchung im Zeitraum · Geplant = Termin im Zeitraum · Stattgefunden/No-Show bei Erst- und Strategiegespräch laut Close-Protokoll, Absagen laut Calendly"
           >
             {r.termine.length === 0 ? (
               <Empty text="Keine Termine im Zeitraum." />
@@ -468,6 +468,27 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
               />
             )}
           </Section>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {(["erst", "strategie"] as const).map((typ) => (
+              <Section
+                key={typ}
+                title={typ === "erst" ? "Ergebnisse Erstgespräch (Setting)" : "Ergebnisse Strategiegespräch (Closing)"}
+                subtitle="„Nächster Schritt“ aus den Close-Protokollen im Zeitraum, je Lead das letzte"
+              >
+                {r.protokollErgebnisse[typ].length === 0 ? (
+                  <Empty text="Keine Protokolle im Zeitraum." />
+                ) : (
+                  <Table
+                    head={["Ergebnis", "Anzahl"]}
+                    rows={r.protokollErgebnisse[typ].map((e) => [
+                      <span key="w" className={e.noShow ? "font-medium text-destructive" : "font-medium"}>{e.wert}</span>,
+                      num(e.anzahl),
+                    ])}
+                  />
+                )}
+              </Section>
+            ))}
+          </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <Section title="Absagegründe">
               {r.absagegruende.length === 0 ? (
