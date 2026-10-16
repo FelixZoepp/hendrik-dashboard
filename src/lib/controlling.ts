@@ -177,7 +177,10 @@ export interface TeamZeile {
 export interface TerminZeile {
   typ: TerminTyp;
   label: string;
-  gebucht: number;
+  /** Im Zeitraum neu gebucht (Buchungsdatum), egal wann der Termin ist */
+  neuGebucht: number;
+  /** Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht */
+  geplant: number;
   stattgefunden: number;
   noShow: number;
   abgesagt: number;
@@ -364,9 +367,9 @@ export function buildReport(input: ControllingInput): ControllingReport {
     { key: "angerufen", label: `Leads angerufen (${calls.length.toLocaleString("de-DE")} Anrufe)`, count: uniqueLeads(calls) },
     { key: "erreicht", label: "Leads erreicht", count: uniqueLeads(calls.filter(isReached)) },
     { key: "gespraech", label: "Leads mit Gespräch > 1 min", count: uniqueLeads(calls.filter(isConversation)) },
-    { key: "erstGebucht", label: "Erstgespräch gebucht", count: erst.length },
+    { key: "erstGebucht", label: "Erstgespräch geplant", count: erst.length },
     { key: "erstShow", label: "Erstgespräch stattgefunden", count: erst.filter(isShow).length },
-    { key: "stratGebucht", label: "Strategie gebucht", count: byTyp(events, "strategie").length },
+    { key: "stratGebucht", label: "Strategie geplant", count: byTyp(events, "strategie").length },
     { key: "stratShow", label: "Strategie stattgefunden", count: strategieShows },
     {
       key: "onboarding",
@@ -505,7 +508,10 @@ export function buildReport(input: ControllingInput): ControllingReport {
       return {
         typ,
         label: TERMIN_LABEL[typ],
-        gebucht: es.length,
+        neuGebucht: input.events.filter(
+          (e) => e.created_at && inRange(e.created_at, periodStart, now) && terminTyp(e.event_type_name) === typ,
+        ).length,
+        geplant: es.length,
         stattgefunden: es.filter(isShow).length,
         noShow: es.filter((e) => e.no_show).length,
         abgesagt: es.filter((e) => e.status === "canceled").length,
@@ -514,7 +520,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
         avgVorlaufTage: vorlauf.length > 0 ? sum(vorlauf, (d) => d) / vorlauf.length : null,
       };
     })
-    .filter((t) => t.gebucht + t.offen > 0);
+    .filter((t) => t.neuGebucht + t.geplant + t.offen > 0);
 
   const abgesagt = events.filter((e) => e.status === "canceled");
   const gruende = new Map<string, number>();

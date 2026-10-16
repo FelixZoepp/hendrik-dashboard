@@ -428,15 +428,19 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
         </TabsContent>
 
         <TabsContent value="termine" className="mt-4 space-y-4">
-          <Section title="Termine nach Typ" subtitle="Show-Rate = stattgefunden / nicht abgesagte, vergangene Termine">
+          <Section
+            title="Termine nach Typ"
+            subtitle="Neu gebucht = Buchung im Zeitraum · Geplant = Termin im Zeitraum (davon stattgefunden, No-Show, abgesagt) · Show-Rate = stattgefunden / nicht abgesagte, vergangene Termine"
+          >
             {r.termine.length === 0 ? (
               <Empty text="Keine Termine im Zeitraum." />
             ) : (
               <Table
-                head={["Typ", "Gebucht", "Stattgefunden", "No-Show", "Abgesagt", "Show-Rate", "Ø Vorlauf", "Kommend"]}
+                head={["Typ", "Neu gebucht", "Geplant", "Stattgefunden", "No-Show", "Abgesagt", "Show-Rate", "Ø Vorlauf", "Kommend"]}
                 rows={r.termine.map((t) => [
                   <span key="l" className="font-medium">{t.label}</span>,
-                  num(t.gebucht),
+                  num(t.neuGebucht),
+                  num(t.geplant),
                   num(t.stattgefunden),
                   num(t.noShow),
                   num(t.abgesagt),
