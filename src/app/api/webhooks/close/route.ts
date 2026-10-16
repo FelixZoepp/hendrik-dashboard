@@ -3,6 +3,7 @@ import { after, NextResponse } from "next/server";
 import { ABGESCHLOSSEN, darfVorwaerts, LEAD, OPP, OPP_TERMIN_AM_FELD, pipelineStand } from "@/lib/close-pipeline";
 import { closeApi } from "@/lib/integrations/close";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { verlustgrundAusWebhook } from "@/lib/verlustgrund/automatik";
 import { verarbeiteCloseProtokoll } from "@/lib/whatsapp/quellen";
 
 // Close-Webhook: Gesprächsprotokolle (Cold Call, Setting, Closing) steuern
@@ -290,6 +291,26 @@ async function whatsappTerminbot(
   }
 }
 
+/**
+ * Verlustgrund-Automatik (Schalter auf /sales/verlustgrund, Standard aus): Grund aus dem Protokoll in die
+ * verlorene Opportunity übernehmen, sonst Aufgabe „Verlustgrund eintragen“. Darf den Webhook nie scheitern lassen.
+ */
+async function verlustgrund(
+  supabase: ReturnType<typeof createAdminClient>,
+  protokoll: Protokoll,
+  oppId: string | null,
+) {
+  try {
+    await verlustgrundAusWebhook(supabase, protokoll, oppId);
+  } catch (err) {
+    await supabase.from("webhook_errors").insert({
+      endpoint: "verlustgrund",
+      payload: { lead_id: protokoll.lead_id, activity_id: protokoll.id, opp_id: oppId },
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function POST(request: Request) {
   const body = await request.text();
   const supabase = createAdminClient();
@@ -331,6 +352,10 @@ export async function POST(request: Request) {
     const ergebnis = await fuehreAus(protokoll, aktion);
     // WhatsApp-Terminbot entkoppelt: Close bekommt sofort Antwort, Bot läuft danach
     after(() => whatsappTerminbot(supabase, protokoll));
+    if (aktion.opp === OPP.verloren) {
+      const oppId = typeof ergebnis.oppVerschoben === "string" ? ergebnis.oppVerschoben : null;
+      after(() => verlustgrund(supabase, protokoll, oppId));
+    }
     if (ergebnis.warnung) {
       await logFehler({ lead_id: protokoll.lead_id, activity_id: activityId }, String(ergebnis.warnung));
     }
