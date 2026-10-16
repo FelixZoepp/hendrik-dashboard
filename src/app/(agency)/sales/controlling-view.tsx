@@ -260,7 +260,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
               label={`${name} stattgefunden`}
               value={num(t.stattgefunden.value)}
               kpi={t.stattgefunden}
-              hint={`laut Close · ${num(t.noShow)} No-Show · ${num(t.abgesagt - t.verschoben)} abgesagt · ${num(t.verschoben)} verschoben${t.ohneProtokoll ? ` · ${num(t.ohneProtokoll)} ohne Protokoll` : ""} · Show-Rate ${pct(t.showRate)} · ${num(t.geplant)} geplant`}
+              hint={`laut Close${t.lautCalendly ? ` (${num(t.lautCalendly)} ohne Protokoll laut Calendly)` : ""} · ${num(t.noShow)} No-Show · ${num(t.abgesagt - t.verschoben)} abgesagt · ${num(t.verschoben)} verschoben${t.ohneProtokoll ? ` · ${num(t.ohneProtokoll)} ohne Protokoll` : ""} · Show-Rate ${pct(t.showRate)} · ${num(t.geplant)} geplant`}
             />,
           ];
         })}
@@ -434,13 +434,13 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
           </Section>
           <Section
             title="Team-Leistung"
-            subtitle="Setter: Termin wird dem letzten Anrufer auf dem Lead vor der Buchung zugeordnet. Neu gebucht = Buchung im Zeitraum, geplant = Termin im Zeitraum. Closer: Host des Strategiegesprächs bzw. Owner der Opportunity."
+            subtitle="Setter: Termin wird dem letzten Anrufer auf dem Lead vor der Buchung zugeordnet (Calendly). Neu gebucht = Buchung im Zeitraum, geplant = Termin im Zeitraum. Show-Quoten je Opener: Tabelle oben (laut Close). Closer: Host des Strategiegesprächs bzw. Owner der Opportunity."
           >
             {r.team.length === 0 ? (
               <Empty text="Keine Team-Aktivität im Zeitraum." />
             ) : (
               <Table
-                head={["Name", "Anrufe", "Erreicht", "Quote", "Gespräche > 1 min", "Ø Gespräch", "Gesprächszeit", "Termine neu gebucht", "Termine geplant", "davon stattgefunden", "Show-Rate", "Neu gebucht/100 Calls", "Strategie geführt", "Deals", "Umsatz", "Closing-Rate"]}
+                head={["Name", "Anrufe", "Erreicht", "Quote", "Gespräche > 1 min", "Ø Gespräch", "Gesprächszeit", "Termine neu gebucht", "Termine geplant", "Neu gebucht/100 Calls", "Strategie geführt", "Deals", "Umsatz", "Closing-Rate"]}
                 rows={r.team.map((t) => [
                   <span key="n" className="font-medium">{t.name}</span>,
                   num(t.anrufe),
@@ -451,8 +451,6 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
                   formatSeconds(t.gespraechszeit),
                   num(t.termineNeu),
                   num(t.termineGesetzt),
-                  num(t.termineStattgefunden),
-                  pct(t.showRate),
                   t.termineJe100 == null ? "—" : num(t.termineJe100, 1),
                   num(t.strategieGeführt),
                   num(t.deals),

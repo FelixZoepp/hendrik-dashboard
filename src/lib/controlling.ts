@@ -308,6 +308,8 @@ export interface ControllingReport {
         /** davon verschoben: dieselbe Person hat danach neu gebucht */
         verschoben: number;
         ohneProtokoll: number;
+        /** ohne Protokoll, nach Calendly als stattgefunden/No-Show gezählt (nur Strategiegespräch) */
+        lautCalendly: number;
         showRate: number | null;
       }
     >;
@@ -407,7 +409,6 @@ export function buildReport(input: ControllingInput): ControllingReport {
     const geplant = byTyp(events, t);
     const e = ergebnisse(t, periodStart, now);
     const ePrev = hasPrev ? ergebnisse(t, prevStart!, prevEnd!) : null;
-    const nichtAbgesagt = geplant.filter((x) => x.status === "active").length;
     const abgesagt = geplant.filter((x) => x.status === "canceled");
     // Verschoben = dieselbe Person hat nach dieser Buchung einen weiteren Termin gleichen Typs gebucht
     const verschoben = abgesagt.filter((x) => {
@@ -423,15 +424,25 @@ export function buildReport(input: ControllingInput): ControllingReport {
         )
       );
     }).length;
+    // Strategiegespräche protokolliert Hendrik kaum → ohne Closing-Protokoll gilt Calendly (nicht abgesagt = stattgefunden, außer No-Show-Markierung)
+    const mitCalendly = (es: CEvent[], erg: { erschienen: number; noShow: number }) => {
+      const ohne = Math.max(0, es.filter((x) => x.status === "active").length - erg.erschienen - erg.noShow);
+      if (t !== "strategie") return { erschienen: erg.erschienen, noShow: erg.noShow, ohne, lautCalendly: 0 };
+      const ns = Math.min(ohne, es.filter((x) => x.status === "active" && x.no_show).length);
+      return { erschienen: erg.erschienen + ohne - ns, noShow: erg.noShow + ns, ohne: 0, lautCalendly: ohne };
+    };
+    const z = mitCalendly(geplant, e);
+    const zPrev = ePrev ? mitCalendly(byTyp(eventsPrev, t), ePrev) : null;
     return {
       neu: { value: neuGebucht(t, periodStart, now), prev: hasPrev ? neuGebucht(t, prevStart!, prevEnd!) : null },
       geplant: geplant.length,
-      stattgefunden: { value: e.erschienen, prev: ePrev ? ePrev.erschienen : null },
-      noShow: e.noShow,
+      stattgefunden: { value: z.erschienen, prev: zPrev ? zPrev.erschienen : null },
+      noShow: z.noShow,
       abgesagt: abgesagt.length,
       verschoben,
-      ohneProtokoll: Math.max(0, nichtAbgesagt - e.erschienen - e.noShow),
-      showRate: ratio(e.erschienen, e.erschienen + e.noShow),
+      ohneProtokoll: z.ohne,
+      lautCalendly: z.lautCalendly,
+      showRate: ratio(z.erschienen, z.erschienen + z.noShow),
     };
   };
   const terminKpis = { erst: terminKpi("erst"), strategie: terminKpi("strategie") };
@@ -483,7 +494,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
     { key: "erstGebucht", label: "Erstgespräch geplant", hint: "Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht", count: erst.length },
     { key: "erstShow", label: "Erstgespräch stattgefunden", hint: "laut Setting-Protokoll in Close", count: terminKpis.erst.stattgefunden.value ?? 0 },
     { key: "stratGebucht", label: "Strategie geplant", hint: "Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht", count: byTyp(events, "strategie").length },
-    { key: "stratShow", label: "Strategie stattgefunden", hint: "laut Closing-Protokoll in Close", count: terminKpis.strategie.stattgefunden.value ?? 0 },
+    { key: "stratShow", label: "Strategie stattgefunden", hint: "laut Closing-Protokoll in Close, ohne Protokoll laut Calendly", count: terminKpis.strategie.stattgefunden.value ?? 0 },
     {
       key: "onboarding",
       label: "Onboarding",
@@ -546,15 +557,12 @@ export function buildReport(input: ControllingInput): ControllingReport {
     const pt = new Date(to.getTime() - shiftMs);
     return {
       label,
-      erst: ev.filter((e) => terminTyp(e.event_type_name) === "erst").length,
+      // Erstgespräch laut Setting-Protokoll (Close), Strategie laut Calendly (Closing-Protokolle fehlen meist)
+      erst: ergebnisse("erst", from, to).erschienen,
       strategie: ev.filter((e) => terminTyp(e.event_type_name) === "strategie").length,
       umsatz: sum(input.opps.filter((o) => o.status_type === "won" && inRange(o.date_won, from, to)), (o) => o.value ?? 0),
       anrufe: input.calls.filter((c) => inRange(c.date_created, from, to)).length,
-      vorperiodeErst: hasPrev
-        ? input.events.filter(
-            (e) => inRange(e.scheduled_at, pf, pt) && isShow(e) && terminTyp(e.event_type_name) === "erst"
-          ).length
-        : null,
+      vorperiodeErst: hasPrev ? ergebnisse("erst", pf, pt).erschienen : null,
     };
   });
 
@@ -629,7 +637,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
       const uw = won.filter((o) => o.user_id === u.close_id);
       return {
         closeId: u.close_id,
-        name: u.name,
+        name: NAMEN[u.close_id] ?? u.name,
         anrufe: uc.length,
         erreicht: reached.length,
         erreichtQuote: ratio(reached.length, uc.length),
