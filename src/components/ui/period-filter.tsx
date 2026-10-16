@@ -4,6 +4,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const PERIODS = [
+  { label: "Woche", value: "woche" },
   { label: "7T", value: "7" },
   { label: "30T", value: "30" },
   { label: "90T", value: "90" },

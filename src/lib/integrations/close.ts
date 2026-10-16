@@ -311,34 +311,16 @@ export interface CloseCustomActivity {
 export async function fetchCustomActivities(
   since?: Date,
 ): Promise<CloseCustomActivity[]> {
-  // Erst alle Custom Activity Types holen
-  const types = await fetchCustomActivityTypes();
-  if (types.length === 0) return [];
-
-  // Pro Type die Activities fetchen (Endpoint: /activity/custom/?custom_activity_type_id=…)
-  const allActivities: CloseCustomActivity[] = [];
-  for (const type of types) {
-    const params: Record<string, string> = { custom_activity_type_id: type.id };
-    if (since) {
-      params.date_created__gte = since.toISOString();
-    }
-
-    try {
-      const activities = await fetchAllPaginated<CloseCustomActivity>(
-        "/activity/custom/",
-        params,
-      );
-      // Type-Name mitgeben
-      for (const a of activities) {
-        a.custom_activity_type_id = type.id;
-      }
-      allActivities.push(...activities);
-    } catch {
-      // Typ hat vielleicht keine Activities, ignorieren
-    }
+  // Alle Typen in einem Endpoint (wie Sales-Auswertung); Fehler bewusst nicht verschlucken
+  const activities = await fetchAllPaginated<CloseCustomActivity & Record<string, unknown>>(
+    "/activity/custom/",
+    since ? { date_created__gte: since.toISOString() } : undefined,
+  );
+  // Close liefert Custom Fields als Top-Level-Keys "custom.cf_…" → in `fields` sammeln
+  for (const a of activities) {
+    a.fields = Object.fromEntries(Object.entries(a).filter(([k]) => k.startsWith("custom.")));
   }
-
-  return allActivities;
+  return activities;
 }
 
 /**
@@ -353,7 +335,7 @@ export interface CloseCustomActivityType {
 export async function fetchCustomActivityTypes(): Promise<CloseCustomActivityType[]> {
   try {
     const response = await closeApi<{ data: CloseCustomActivityType[] }>(
-      "/custom_activity_type/",
+      "/custom_activity/",
     );
     return response.data;
   } catch {

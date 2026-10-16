@@ -5,7 +5,7 @@ import { fetchAll } from "@/lib/supabase/fetch-all";
 
 import { MarketingDashboard, type MarketingDashboardProps } from "./marketing-dashboard";
 import { PeriodFilter } from "@/components/ui/period-filter";
-import { getDaysFromSearchParams, getPeriod, berlinDateString } from "@/lib/period-utils";
+import { getDaysFromSearchParams, getPeriod, berlinDateString, istWoche } from "@/lib/period-utils";
 
 export const metadata: Metadata = { title: "Marketing" };
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export default async function MarketingPage({
   const params = await searchParams;
   const days = getDaysFromSearchParams(params);
 
-  const period = getPeriod(days);
+  const period = getPeriod(days, new Date(), { woche: istWoche(params) });
   const since = berlinDateString(period.start);
   const sinceTs = period.start.toISOString();
   const untilTs = period.end.toISOString();

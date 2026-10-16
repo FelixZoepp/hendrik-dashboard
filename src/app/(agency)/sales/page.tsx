@@ -4,7 +4,7 @@ import { addDays } from "date-fns";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAll } from "@/lib/supabase/fetch-all";
 import { fetchCloseTotals } from "@/lib/integrations/close";
-import { getDaysFromSearchParams, getPeriod, berlinDateString } from "@/lib/period-utils";
+import { getDaysFromSearchParams, getPeriod, berlinDateString, istWoche } from "@/lib/period-utils";
 import {
   buildReport,
   type CCall,
@@ -27,8 +27,9 @@ export default async function SalesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const supabase = createAdminClient();
-  const days = getDaysFromSearchParams(await searchParams);
-  const period = getPeriod(days);
+  const params = await searchParams;
+  const days = getDaysFromSearchParams(params);
+  const period = getPeriod(days, new Date(), { woche: istWoche(params) });
   const { end: now, start: periodStart, prevStart, prevEnd } = period;
   const loadFrom = (prevStart ?? periodStart).toISOString();
 

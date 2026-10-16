@@ -149,7 +149,13 @@ export async function GET(request: Request) {
     const customTypes = await fetchCustomActivityTypes();
     const typeMap = new Map(customTypes.map((t) => [t.id, t.name]));
 
-    const customActs = await fetchCustomActivities(since);
+    // Noch nie Protokolle gespeichert (früherer Sync-Fehler) → 90 Tage nachladen
+    const { count: customCount } = await supabase
+      .from("close_custom_activities")
+      .select("close_id", { count: "exact", head: true });
+    const customSince = !customCount && !full ? subDays(new Date(), 90) : since;
+    // Nur abgeschlossene Protokolle (Entwürfe zählen nicht, wie in der Sales-Auswertung)
+    const customActs = (await fetchCustomActivities(customSince)).filter((ca) => ca.status !== "draft");
     await batchUpsert(
       supabase,
       "close_custom_activities",

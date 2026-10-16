@@ -3,6 +3,7 @@ export function getDaysFromSearchParams(
 ): number {
   const raw = searchParams.tage;
   const value = Array.isArray(raw) ? raw[0] : raw;
+  if (value === WOCHE) return wochentageBisHeute();
   const num = parseInt(value ?? "90", 10);
   if ([7, 30, 90, 9999].includes(num)) return num;
   return 90;
@@ -63,10 +64,25 @@ export interface Period {
 
 const fmtDay = new Intl.DateTimeFormat("de-DE", { timeZone: TZ, day: "2-digit", month: "2-digit", year: "numeric" });
 
-export function getPeriod(days: number, now = new Date()): Period {
+/** Filterwert für „Diese Woche“ (Montag 00:00 bis jetzt, Berlin) */
+export const WOCHE = "woche";
+
+/** Anzahl Kalendertage von Montag bis heute (Mo = 1 … So = 7), Berlin */
+export function wochentageBisHeute(now = new Date()): number {
+  const { y, m, d } = berlinYmd(now);
+  return ((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7) + 1;
+}
+
+export function istWoche(searchParams: Record<string, string | string[] | undefined>): boolean {
+  const raw = searchParams.tage;
+  return (Array.isArray(raw) ? raw[0] : raw) === WOCHE;
+}
+
+/** `woche`: Zeitraum ab Montag, Vergleich mit der Vorwoche (Montag bis gleicher Wochentag/Uhrzeit). */
+export function getPeriod(days: number, now = new Date(), opts: { woche?: boolean } = {}): Period {
   const allTime = days >= 9999;
   const start = allTime ? new Date("2000-01-01T00:00:00Z") : berlinDayStart(now, -(days - 1));
-  const prevStart = allTime ? null : berlinDayStart(now, -(2 * days - 1));
+  const prevStart = allTime ? null : berlinDayStart(now, -(days - 1) - (opts.woche ? 7 : days));
   // Gleich lange Vorperiode bis zur gleichen relativen Uhrzeit (fairer Vergleich, wenn heute erst halb vorbei ist)
   const prevEnd = prevStart ? new Date(prevStart.getTime() + (now.getTime() - start.getTime())) : null;
   const lastDayOf = (d: Date) => new Date(d.getTime() - 1);
@@ -77,7 +93,7 @@ export function getPeriod(days: number, now = new Date()): Period {
     end: now,
     prevStart,
     prevEnd,
-    label: allTime ? "Gesamter Zeitraum" : days === 7 ? "Letzte 7 Tage" : `Letzte ${days} Tage`,
+    label: allTime ? "Gesamter Zeitraum" : opts.woche ? "Diese Woche" : days === 7 ? "Letzte 7 Tage" : `Letzte ${days} Tage`,
     rangeLabel: allTime ? "alle Daten" : `${fmtDay.format(start)} – ${fmtDay.format(now)}`,
     prevRangeLabel:
       prevStart && prevEnd ? `${fmtDay.format(prevStart)} – ${fmtDay.format(lastDayOf(prevEnd))}` : null,
