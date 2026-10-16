@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { waVerbindung } from "@/lib/whatsapp/client";
 import { ladeEinstellungen, speichereEinstellung } from "@/lib/whatsapp/einstellungen";
@@ -6,15 +6,20 @@ import { verarbeiteOffeneEingaenge } from "@/lib/whatsapp/eingang";
 import { verarbeiteJobs } from "@/lib/whatsapp/jobs";
 import { gleicheVorlagenAb } from "@/lib/whatsapp/verwaltung";
 import { sendeFaelligeBerichte } from "@/lib/sales-bericht";
+import { berlinTeile } from "@/lib/whatsapp/logik";
 
 // WhatsApp-Terminbot: minütlich per Supabase pg_cron + pg_net (supabase/cron_whatsapp.sql).
 // Arbeitet liegengebliebene Eingänge und fällige Jobs ab (max. ~50 s) und gleicht stündlich
-// den Vorlagen-Status bei Meta ab.
+// den Vorlagen-Status bei Meta ab. Stößt außerdem tagsüber stündlich den Close-Sync an
+// (Vercel-Cron im Hobby-Tarif nur 1× täglich).
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 const ABGLEICH_ALLE_MS = 60 * 60_000;
+const CLOSE_SYNC_KEY = "close_sync_am";
+/** Close-Sync stündlich zwischen 07:00 und 21:59 (Berlin) */
+const CLOSE_SYNC_STUNDEN = { von: 7, bis: 21 };
 
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
@@ -50,6 +55,31 @@ export async function GET(request: Request) {
     const message = err instanceof Error ? err.message : String(err);
     await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "bericht" }, error: message });
     antwort.berichtFehler = message;
+  }
+
+  // Close-Sync stündlich anstoßen: läuft als eigener Request (maxDuration 300 s), hier nur auslösen
+  try {
+    const stunde = berlinTeile(new Date()).stunde;
+    if (stunde >= CLOSE_SYNC_STUNDEN.von && stunde <= CLOSE_SYNC_STUNDEN.bis) {
+      const { data } = await supabase.from("wa_einstellungen").select("wert").eq("key", CLOSE_SYNC_KEY).maybeSingle();
+      const zuletzt = typeof data?.wert === "string" ? new Date(data.wert).getTime() : 0;
+      if (Date.now() - zuletzt > ABGLEICH_ALLE_MS) {
+        // Vorab markieren, damit ein Fehler nicht jede Minute erneut auslöst
+        const { error } = await supabase
+          .from("wa_einstellungen")
+          .upsert({ key: CLOSE_SYNC_KEY, wert: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "key" });
+        if (error) throw new Error(`Close-Sync-Marker nicht gespeichert: ${error.message}`);
+        const url = new URL("/api/cron/sync-close", request.url);
+        after(() =>
+          fetch(url, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(55_000) }).catch(() => {}),
+        );
+        antwort.closeSync = "angestoßen";
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "close-sync" }, error: message });
+    antwort.closeSyncFehler = message;
   }
 
   // Vorlagen-Status stündlich abgleichen (nur lesen)

@@ -19,6 +19,11 @@ const ERGEBNIS_FELD = {
   [PROTOKOLL.closing]: "custom.cf_9vkQK8YANMMZ3lyt0aAZbAnkAxYoB15WwM5sTyr3veM",
 } as const;
 
+/** Cold Call: „Nächster Schritt“ bei erreichtem Entscheider bzw. beim Gatekeeper (siehe Close-Webhook) */
+const CC_ENTSCHEIDER_FELD = ERGEBNIS_FELD[PROTOKOLL.coldCall];
+const CC_GATEKEEPER_FELD = "custom.cf_Xxgy5VSO7ySrEAApTVz7hJTfkTd4RJ8orivHrSLe4SC";
+const TERMIN_GEBUCHT = "Setting vereinbart am:";
+
 /** Ergebnisse, die als Termin/Erfolg gezählt werden (Wert im Feld „Nächster Schritt“). */
 const ERFOLGE: Array<{ typ: string; wert: string; label: string }> = [
   { typ: PROTOKOLL.coldCall, wert: "Setting vereinbart am:", label: "Settings vereinbart" },
@@ -194,10 +199,15 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
   const raus = calls.filter((c) => c.direction === "outbound" && imZeitraum(c.date_created, z));
   const erreicht = raus.filter((c) => c.disposition === "answered");
   const gespraechszeit = raus.reduce((s, c) => s + (c.duration ?? 0), 0);
-  const proUser = new Map<string, { anwahlen: number; erreicht: number; protokolle: number; erfolge: number }>();
+  const proUser = new Map<
+    string,
+    { anwahlen: number; erreicht: number; protokolle: number; entscheider: Set<string>; termine: Set<string>; erfolge: number }
+  >();
   const zeile = (id: string | null) => {
     const k = wer(id);
-    if (!proUser.has(k)) proUser.set(k, { anwahlen: 0, erreicht: 0, protokolle: 0, erfolge: 0 });
+    if (!proUser.has(k)) {
+      proUser.set(k, { anwahlen: 0, erreicht: 0, protokolle: 0, entscheider: new Set(), termine: new Set(), erfolge: 0 });
+    }
     return proUser.get(k)!;
   };
   for (const c of raus) {
@@ -213,13 +223,31 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
     n: fertig.filter((p) => p.custom_activity_type_id === e.typ && p[ERGEBNIS_FELD[e.typ as keyof typeof ERGEBNIS_FELD]] === e.wert)
       .length,
   }));
+  // Cold Calls je Lead (mehrere Protokolle zum selben Lead zählen einmal): Entscheider erreicht / Gatekeeper / Termin gebucht
+  const ccEntscheider = new Set<string>();
+  const ccGatekeeper = new Set<string>();
+  const ccTermine = new Set<string>();
   for (const p of fertig) {
     const r = zeile(p.user_id);
     r.protokolle++;
-    if (erfolge.some((e) => e.typ === p.custom_activity_type_id && p[ERGEBNIS_FELD[e.typ as keyof typeof ERGEBNIS_FELD]] === e.wert)) {
+    if (p.custom_activity_type_id === PROTOKOLL.coldCall) {
+      if (p[CC_ENTSCHEIDER_FELD]) {
+        r.entscheider.add(p.lead_id);
+        ccEntscheider.add(p.lead_id);
+      } else if (p[CC_GATEKEEPER_FELD]) {
+        ccGatekeeper.add(p.lead_id);
+      }
+      if (p[CC_ENTSCHEIDER_FELD] === TERMIN_GEBUCHT) {
+        r.termine.add(p.lead_id);
+        ccTermine.add(p.lead_id);
+      }
+    } else if (
+      erfolge.some((e) => e.typ === p.custom_activity_type_id && p[ERGEBNIS_FELD[e.typ as keyof typeof ERGEBNIS_FELD]] === e.wert)
+    ) {
       r.erfolge++;
     }
   }
+  for (const l of ccEntscheider) ccGatekeeper.delete(l);
 
   // WhatsApp-Bestätigungen: Termine im Zeitraum, deren Bestätigungsanfrage zugestellt wurde
   const termine = (termineRes.data ?? []) as WaTermin[];
@@ -248,8 +276,10 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
       ([n, r]) =>
         `• ${n}: ${[
           r.anwahlen ? `${r.anwahlen} Anwahlen · ${r.erreicht} erreicht` : null,
+          r.anwahlen || r.entscheider.size ? `${r.entscheider.size} Entscheider` : null,
+          r.anwahlen || r.termine.size ? `*${r.termine.size} ${r.termine.size === 1 ? "Termin" : "Termine"} gebucht*` : null,
           `${r.protokolle} Protokolle`,
-          r.erfolge ? `${r.erfolge} ${r.erfolge === 1 ? "Termin/Abschluss" : "Termine/Abschlüsse"}` : null,
+          r.erfolge ? `${r.erfolge} ${r.erfolge === 1 ? "Closing/Abschluss" : "Closings/Abschlüsse"}` : null,
         ]
           .filter(Boolean)
           .join(" · ")}`,
@@ -262,6 +292,7 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
   const zeilen = [
     `📞 *Anwahlen:* ${raus.length} · erreicht ${erreicht.length} (${prozent(erreicht.length, raus.length)}) · Gesprächszeit ${minuten(gespraechszeit)}`,
     `📝 *Protokolle:* ${fertig.length} – Cold Call ${anzahl(PROTOKOLL.coldCall)} · Setting ${anzahl(PROTOKOLL.setting)} · Closing ${anzahl(PROTOKOLL.closing)}`,
+    `🧑‍💼 *Entscheider erreicht:* ${ccEntscheider.size} · Gatekeeper ${ccGatekeeper.size} · *${ccTermine.size} Termine gebucht* (${prozent(ccTermine.size, ccEntscheider.size)} der Entscheider)`,
     `🎯 *Ergebnisse:* ${erfolge.map((e) => `${e.label} ${e.n}`).join(" · ")}`,
     " ",
     `🤝 *Settings:* ${ts.setting.geplant} geplant · *${ts.setting.erschienen} erschienen* (${prozent(ts.setting.erschienen, Math.max(ts.setting.geplant, ts.setting.protokolliert))}) · ${ts.setting.noShow} No-Show${ohneProtokoll(ts.setting)} · ${ts.setting.qualifiziert} qualifiziert · *${ts.setting.closingGelegt} zum Closing gelegt*${ts.setting.followUp ? ` · ${ts.setting.followUp} Follow-Up` : ""}`,

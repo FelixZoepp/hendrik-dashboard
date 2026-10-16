@@ -361,7 +361,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
   // --- Funnel ---
   // Mengen = eindeutige Leads bzw. Termine. `basis` = Index der Bezugsstufe für die Conversion.
   const stufen: (Omit<FunnelStufe, "rateVorher" | "kostenJe"> & { basis?: number })[] = [
-    { key: "angerufen", label: "Leads angerufen", count: uniqueLeads(calls) },
+    { key: "angerufen", label: `Leads angerufen (${calls.length.toLocaleString("de-DE")} Anrufe)`, count: uniqueLeads(calls) },
     { key: "erreicht", label: "Leads erreicht", count: uniqueLeads(calls.filter(isReached)) },
     { key: "gespraech", label: "Leads mit Gespräch > 1 min", count: uniqueLeads(calls.filter(isConversation)) },
     { key: "erstGebucht", label: "Erstgespräch gebucht", count: erst.length },
