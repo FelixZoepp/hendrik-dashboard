@@ -10,6 +10,7 @@ import {
   closeUserName,
 } from "@/lib/integrations/close";
 import { subDays } from "date-fns";
+import { pruefeVerloreneOpps } from "@/lib/verlustgrund/automatik";
 
 export const maxDuration = 300;
 
@@ -125,6 +126,20 @@ export async function GET(request: Request) {
     );
     totalRecords += opps.length;
 
+    // 3b. Verlustgrund-Pflicht (Schalter verlustgrund_aufgabe, Standard aus): manuell verloren ohne Grund → Aufgabe.
+    // Fehler hier dürfen den Sync nicht scheitern lassen.
+    const verlustgrund = await pruefeVerloreneOpps(
+      supabase,
+      opps as unknown as Parameters<typeof pruefeVerloreneOpps>[1],
+    ).catch(async (err) => {
+      await supabase.from("webhook_errors").insert({
+        endpoint: "verlustgrund",
+        payload: { quelle: "sync-close" },
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
+
     // 4. Activities
     // Activities ändern sich nachträglich kaum — im Full-Modus reicht eine Woche
     const activities = await fetchActivities(full ? subDays(new Date(), 7) : since);
@@ -183,7 +198,7 @@ export async function GET(request: Request) {
         .eq("id", syncId);
     }
 
-    return NextResponse.json({ ok: true, records: totalRecords, full, since: since.toISOString() });
+    return NextResponse.json({ ok: true, records: totalRecords, full, since: since.toISOString(), verlustgrund });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
 
