@@ -247,7 +247,23 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
         <KpiCard label="Ad Spend" value={euro(k.adSpend.value)} kpi={k.adSpend} invert />
         <KpiCard label="CAC" value={euro(k.cac.value)} kpi={k.cac} invert hint="Ad Spend / gewonnene Deals" />
         <KpiCard label="Neue Leads" value={num(k.leads.value)} kpi={k.leads} />
-        <KpiCard label="Show-Rate Erstgespräch" value={pct(k.showRateErst.value)} kpi={k.showRateErst} />
+        <KpiCard label="Anrufe" value={num(k.anrufe.value)} kpi={k.anrufe} hint={`${num(k.leadsAngerufen)} Leads angerufen · ${num(k.leadsErreicht)} erreicht`} />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {(["erst", "strategie"] as const).flatMap((typ) => {
+          const t = k.termine[typ];
+          const name = typ === "erst" ? "Erstgespräche" : "Strategiegespräche";
+          return [
+            <KpiCard key={`${typ}-neu`} label={`${name} neu gebucht`} value={num(t.neu.value)} kpi={t.neu} hint="Buchung im Zeitraum, egal wann der Termin ist" />,
+            <KpiCard
+              key={`${typ}-show`}
+              label={`${name} stattgefunden`}
+              value={num(t.stattgefunden.value)}
+              kpi={t.stattgefunden}
+              hint={`von ${num(t.geplant)} geplant · ${num(t.noShow)} No-Show · ${num(t.abgesagt)} abgesagt · Show-Rate ${pct(t.showRate)}`}
+            />,
+          ];
+        })}
       </div>
 
       {/* Funnel + Kommende Termine */}
@@ -394,13 +410,13 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
         <TabsContent value="team" className="mt-4">
           <Section
             title="Team-Leistung"
-            subtitle="Setter: Termin wird dem letzten Anrufer auf dem Lead vor der Buchung zugeordnet. Closer: Host des Strategiegesprächs bzw. Owner der Opportunity."
+            subtitle="Setter: Termin wird dem letzten Anrufer auf dem Lead vor der Buchung zugeordnet. Neu gebucht = Buchung im Zeitraum, geplant = Termin im Zeitraum. Closer: Host des Strategiegesprächs bzw. Owner der Opportunity."
           >
             {r.team.length === 0 ? (
               <Empty text="Keine Team-Aktivität im Zeitraum." />
             ) : (
               <Table
-                head={["Name", "Anrufe", "Erreicht", "Quote", "Gespräche > 1 min", "Ø Gespräch", "Gesprächszeit", "Termine gesetzt", "davon Show", "Show-Rate", "Termine/100 Calls", "Strategie geführt", "Deals", "Umsatz", "Closing-Rate"]}
+                head={["Name", "Anrufe", "Erreicht", "Quote", "Gespräche > 1 min", "Ø Gespräch", "Gesprächszeit", "Termine neu gebucht", "Termine geplant", "davon stattgefunden", "Show-Rate", "Neu gebucht/100 Calls", "Strategie geführt", "Deals", "Umsatz", "Closing-Rate"]}
                 rows={r.team.map((t) => [
                   <span key="n" className="font-medium">{t.name}</span>,
                   num(t.anrufe),
@@ -409,6 +425,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
                   num(t.gespraeche),
                   t.avgDauer == null ? "—" : formatSeconds(t.avgDauer),
                   formatSeconds(t.gespraechszeit),
+                  num(t.termineNeu),
                   num(t.termineGesetzt),
                   num(t.termineStattgefunden),
                   pct(t.showRate),

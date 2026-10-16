@@ -164,6 +164,9 @@ export interface TeamZeile {
   gespraeche: number;
   gespraechszeit: number; // Sekunden
   avgDauer: number | null;
+  /** Vom Setter im Zeitraum neu gebuchte Termine (Buchungsdatum) */
+  termineNeu: number;
+  /** Vom Setter gebuchte Termine, die im Zeitraum stattfinden sollten */
   termineGesetzt: number;
   termineStattgefunden: number;
   showRate: number | null;
@@ -257,6 +260,9 @@ export interface ControllingReport {
     roas: Kpi;
     leads: Kpi;
     anrufe: Kpi;
+    leadsAngerufen: number;
+    leadsErreicht: number;
+    termine: Record<"erst" | "strategie", { neu: Kpi; geplant: number; stattgefunden: Kpi; noShow: number; abgesagt: number; showRate: number | null }>;
     showRateErst: Kpi;
     onboardings: Kpi;
   };
@@ -334,6 +340,20 @@ export function buildReport(input: ControllingInput): ControllingReport {
   const erstVergangen = erst.filter((e) => e.status === "active");
   const erstVergangenPrev = erstPrev.filter((e) => e.status === "active");
   const pv = <T>(v: T) => (hasPrev ? v : null);
+  const neuGebucht = (t: TerminTyp, from: Date, to: Date) =>
+    input.events.filter((e) => e.created_at && inRange(e.created_at, from, to) && terminTyp(e.event_type_name) === t).length;
+  const terminKpi = (t: "erst" | "strategie") => {
+    const geplant = byTyp(events, t);
+    const nichtAbgesagt = geplant.filter((e) => e.status === "active");
+    return {
+      neu: { value: neuGebucht(t, periodStart, now), prev: hasPrev ? neuGebucht(t, prevStart!, prevEnd!) : null },
+      geplant: geplant.length,
+      stattgefunden: { value: geplant.filter(isShow).length, prev: pv(byTyp(eventsPrev, t).filter(isShow).length) },
+      noShow: geplant.filter((e) => e.no_show).length,
+      abgesagt: geplant.filter((e) => e.status === "canceled").length,
+      showRate: ratio(nichtAbgesagt.filter(isShow).length, nichtAbgesagt.length),
+    };
+  };
 
   const kpis: ControllingReport["kpis"] = {
     umsatz: { value: umsatz, prev: pv(umsatzPrev) },
@@ -351,6 +371,9 @@ export function buildReport(input: ControllingInput): ControllingReport {
     roas: { value: ratio(umsatz, adSpend), prev: pv(ratio(umsatzPrev, adSpendPrev)) },
     leads: { value: input.leadsNew, prev: input.leadsNewPrev },
     anrufe: { value: calls.length, prev: pv(callsPrev.length) },
+    leadsAngerufen: uniqueLeads(calls),
+    leadsErreicht: uniqueLeads(calls.filter(isReached)),
+    termine: { erst: terminKpi("erst"), strategie: terminKpi("strategie") },
     showRateErst: {
       value: ratio(erstVergangen.filter(isShow).length, erstVergangen.length),
       prev: pv(ratio(erstVergangenPrev.filter(isShow).length, erstVergangenPrev.length)),
@@ -367,9 +390,9 @@ export function buildReport(input: ControllingInput): ControllingReport {
     { key: "angerufen", label: `Leads angerufen (${calls.length.toLocaleString("de-DE")} Anrufe)`, count: uniqueLeads(calls) },
     { key: "erreicht", label: "Leads erreicht", count: uniqueLeads(calls.filter(isReached)) },
     { key: "gespraech", label: "Leads mit Gespräch > 1 min", count: uniqueLeads(calls.filter(isConversation)) },
-    { key: "erstGebucht", label: "Erstgespräch geplant", count: erst.length },
+    { key: "erstGebucht", label: "Erstgespräch geplant", hint: "Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht", count: erst.length },
     { key: "erstShow", label: "Erstgespräch stattgefunden", count: erst.filter(isShow).length },
-    { key: "stratGebucht", label: "Strategie geplant", count: byTyp(events, "strategie").length },
+    { key: "stratGebucht", label: "Strategie geplant", hint: "Termin liegt im Zeitraum (inkl. abgesagter), egal wann gebucht", count: byTyp(events, "strategie").length },
     { key: "stratShow", label: "Strategie stattgefunden", count: strategieShows },
     {
       key: "onboarding",
@@ -465,6 +488,9 @@ export function buildReport(input: ControllingInput): ControllingReport {
       const reached = uc.filter(isReached);
       const talk = sum(uc, (c) => c.duration ?? 0);
       const gesetzt = events.filter((e) => e.utm?._setter_user_id === u.close_id);
+      const neu = input.events.filter(
+        (e) => e.utm?._setter_user_id === u.close_id && e.created_at && inRange(e.created_at, periodStart, now),
+      );
       const gesetztVergangen = gesetzt.filter((e) => e.status === "active" && new Date(e.scheduled_at) < now);
       const geführt = byTyp(events, "strategie").filter(
         (e) => isShow(e) && e.host_email && usersByEmail.get(e.host_email.toLowerCase())?.close_id === u.close_id
@@ -482,17 +508,18 @@ export function buildReport(input: ControllingInput): ControllingReport {
           sum(uc.filter(isConversation), (c) => c.duration ?? 0),
           uc.filter(isConversation).length
         ),
+        termineNeu: neu.length,
         termineGesetzt: gesetzt.length,
         termineStattgefunden: gesetzt.filter(isShow).length,
         showRate: ratio(gesetzt.filter(isShow).length, gesetztVergangen.length),
-        termineJe100: uc.length > 0 ? (gesetzt.length / uc.length) * 100 : null,
+        termineJe100: uc.length > 0 ? (neu.length / uc.length) * 100 : null,
         strategieGeführt: geführt,
         deals: uw.length,
         umsatz: sum(uw, (o) => o.value ?? 0),
         closingRate: ratio(uw.length, geführt),
       };
     })
-    .filter((t) => t.anrufe + t.termineGesetzt + t.strategieGeführt + t.deals > 0)
+    .filter((t) => t.anrufe + t.termineNeu + t.termineGesetzt + t.strategieGeführt + t.deals > 0)
     .sort((a, b) => b.umsatz - a.umsatz || b.termineGesetzt - a.termineGesetzt || b.anrufe - a.anrufe);
 
   // --- Termine ---

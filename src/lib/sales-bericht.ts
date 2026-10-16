@@ -175,7 +175,7 @@ export function terminStatistik(protokolle: Protokoll[], termine: Array<{ art: s
 
 export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "tag" | "woche") {
   const params = { date_created__gte: z.von.toISOString(), date_created__lt: z.bis.toISOString() };
-  const [calls, protokolle, users, termineRes, calendlyRes] = await Promise.all([
+  const [calls, protokolle, users, termineRes, calendlyRes, neuRes] = await Promise.all([
     alleSeiten<Call>("/activity/call/", { ...params, _fields: "user_id,direction,disposition,duration,date_created" }),
     alleSeiten<Protokoll>("/activity/custom/", params),
     alleSeiten<CloseUser>("/user/", {}),
@@ -191,7 +191,15 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
       .gte("scheduled_at", z.von.toISOString())
       .lt("scheduled_at", z.bis.toISOString())
       .eq("status", "active"),
+    // Neu gebucht = Buchung im Zeitraum (auch später abgesagte), egal wann der Termin ist
+    svc
+      .from("calendly_events")
+      .select("event_type_name")
+      .gte("created_at", z.von.toISOString())
+      .lt("created_at", z.bis.toISOString()),
   ]);
+  const neuGebucht = (a: string) =>
+    ((neuRes.data ?? []) as Array<{ event_type_name: string | null }>).filter((e) => artAusCalendly(e.event_type_name) === a).length;
   const name = new Map(users.map((u) => [u.id, NAMEN[u.id] ?? closeUserName(u)]));
   const wer = (id: string | null) => (id ? name.get(id) ?? "Unbekannt" : "Unbekannt");
 
@@ -295,8 +303,8 @@ export async function erstelleBericht(svc: SupabaseClient, z: Zeitraum, art: "ta
     `🧑‍💼 *Entscheider erreicht:* ${ccEntscheider.size} · Gatekeeper ${ccGatekeeper.size} · *${ccTermine.size} Termine gebucht* (${prozent(ccTermine.size, ccEntscheider.size)} der Entscheider)`,
     `🎯 *Ergebnisse:* ${erfolge.map((e) => `${e.label} ${e.n}`).join(" · ")}`,
     " ",
-    `🤝 *Settings:* ${ts.setting.geplant} geplant · *${ts.setting.erschienen} erschienen* (${prozent(ts.setting.erschienen, Math.max(ts.setting.geplant, ts.setting.protokolliert))}) · ${ts.setting.noShow} No-Show${ohneProtokoll(ts.setting)} · ${ts.setting.qualifiziert} qualifiziert · *${ts.setting.closingGelegt} zum Closing gelegt*${ts.setting.followUp ? ` · ${ts.setting.followUp} Follow-Up` : ""}`,
-    `💼 *Closings:* ${ts.closing.geplant} geplant · *${ts.closing.erschienen} erschienen* (${prozent(ts.closing.erschienen, Math.max(ts.closing.geplant, ts.closing.protokolliert))}) · ${ts.closing.noShow} No-Show${ohneProtokoll(ts.closing)} · *${ts.closing.geclosed} geclosed* (${prozent(ts.closing.geclosed, ts.closing.erschienen)})${ts.closing.cc2 ? ` · ${ts.closing.cc2} CC2` : ""}${ts.closing.angebot ? ` · ${ts.closing.angebot} Angebot` : ""}`,
+    `🤝 *Settings (Erstgespräche):* ${neuGebucht("erstgespraech")} neu gebucht · ${ts.setting.geplant} geplant · *${ts.setting.erschienen} erschienen* (${prozent(ts.setting.erschienen, Math.max(ts.setting.geplant, ts.setting.protokolliert))}) · ${ts.setting.noShow} No-Show${ohneProtokoll(ts.setting)} · ${ts.setting.qualifiziert} qualifiziert · *${ts.setting.closingGelegt} zum Closing gelegt*${ts.setting.followUp ? ` · ${ts.setting.followUp} Follow-Up` : ""}`,
+    `💼 *Closings (Strategiegespräche):* ${neuGebucht("strategie")} neu gebucht · ${ts.closing.geplant} geplant · *${ts.closing.erschienen} erschienen* (${prozent(ts.closing.erschienen, Math.max(ts.closing.geplant, ts.closing.protokolliert))}) · ${ts.closing.noShow} No-Show${ohneProtokoll(ts.closing)} · *${ts.closing.geclosed} geclosed* (${prozent(ts.closing.geclosed, ts.closing.erschienen)})${ts.closing.cc2 ? ` · ${ts.closing.cc2} CC2` : ""}${ts.closing.angebot ? ` · ${ts.closing.angebot} Angebot` : ""}`,
     `✅ *Termine bestätigt (WhatsApp):* ${bestaetigt.length} von ${angeschrieben.length} (${prozent(bestaetigt.length, angeschrieben.length)}) – Erstgespräch ${quoteArt("erstgespraech")} · Strategie ${quoteArt("strategie")}${termine.length > angeschrieben.length ? ` · ${termine.length - angeschrieben.length} Termin(e) ohne zugestellte WhatsApp` : ""}`,
     ...(team.length ? [" ", "*Team*", ...team] : []),
   ];
