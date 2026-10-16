@@ -101,12 +101,19 @@ export default async function SalesPage({
       fetchCloseTotals().catch(() => null),
     ]);
 
+  // Testbuchungen des eigenen Teams (Zoepp Media, Close-Benutzer) nicht mitzählen
+  const teamEmails = new Set(users.map((u) => u.email?.toLowerCase()).filter(Boolean));
+  const istTest = (e: CEvent) => {
+    const m = e.invitee_email?.toLowerCase() ?? "";
+    return m.endsWith("@zoeppmedia.de") || teamEmails.has(m);
+  };
+
   const report = buildReport({
     period,
     users,
     opps,
     calls,
-    events,
+    events: events.filter((e) => !istTest(e)),
     protokolle,
     meta,
     leadsNew: leadsNew ?? 0,

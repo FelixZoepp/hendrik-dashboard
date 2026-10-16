@@ -17,6 +17,7 @@ import {
   leadEinesPassendenTermins,
   legeTerminAn,
   letzterTerminDesLeads,
+  verpassterTerminDesLeads,
   markiereStattgefunden,
   markiereVerpasst,
   sagTerminAb,
@@ -265,6 +266,13 @@ export async function verarbeiteCloseProtokoll(
       } else if (termin) {
         await markiereStattgefunden(svc, termin, e.protokoll.id);
         ergebnis.stattgefunden = termin.id;
+      } else if (!istNoShow(e.wert)) {
+        // Neues Protokoll korrigiert ein voreiliges No-Show (z. B. erst „No-Show“, dann „Closing gelegt“)
+        const verpasst = await verpassterTerminDesLeads(svc, leadId, gespraech, jetzt);
+        if (verpasst) {
+          await markiereStattgefunden(svc, verpasst, e.protokoll.id);
+          ergebnis.korrigiert = verpasst.id;
+        }
       }
     }
   }

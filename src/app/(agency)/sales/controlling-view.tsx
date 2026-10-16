@@ -260,7 +260,7 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
               label={`${name} stattgefunden`}
               value={num(t.stattgefunden.value)}
               kpi={t.stattgefunden}
-              hint={`laut Close · ${num(t.noShow)} No-Show · ${num(t.abgesagt)} abgesagt${t.ohneProtokoll ? ` · ${num(t.ohneProtokoll)} ohne Protokoll` : ""} · Show-Rate ${pct(t.showRate)} · ${num(t.geplant)} geplant`}
+              hint={`laut Close · ${num(t.noShow)} No-Show · ${num(t.abgesagt - t.verschoben)} abgesagt · ${num(t.verschoben)} verschoben${t.ohneProtokoll ? ` · ${num(t.ohneProtokoll)} ohne Protokoll` : ""} · Show-Rate ${pct(t.showRate)} · ${num(t.geplant)} geplant`}
             />,
           ];
         })}
@@ -407,7 +407,31 @@ export function ControllingView({ report: r }: { report: ControllingReport }) {
           <TabsTrigger value="daten">Datenqualität</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="team" className="mt-4">
+        <TabsContent value="team" className="mt-4 space-y-4">
+          <Section
+            title="Opener: Show-Quote und Umsatz"
+            subtitle="Termine laut Cold-Call-Protokoll („Setting vereinbart“) im Zeitraum · Ergebnis laut folgendem Setting-Protokoll · Deals/Umsatz = gewonnene Opportunities dieser Leads (auch nach dem Zeitraum)"
+          >
+            {r.opener.length === 0 ? (
+              <Empty text="Keine gelegten Termine im Zeitraum." />
+            ) : (
+              <Table
+                head={["Opener", "Termine gelegt", "Stattgefunden", "No-Show", "Offen / ohne Protokoll", "Show-Quote", "Closing gelegt", "Deals", "Umsatz", "Umsatz je Termin"]}
+                rows={r.opener.map((o) => [
+                  <span key="n" className="font-medium">{o.name}</span>,
+                  num(o.termineGelegt),
+                  num(o.stattgefunden),
+                  num(o.noShow),
+                  num(o.offen),
+                  pct(o.showRate),
+                  num(o.closingsGelegt),
+                  num(o.deals),
+                  euro(o.umsatz),
+                  euro(o.termineGelegt ? o.umsatz / o.termineGelegt : null),
+                ])}
+              />
+            )}
+          </Section>
           <Section
             title="Team-Leistung"
             subtitle="Setter: Termin wird dem letzten Anrufer auf dem Lead vor der Buchung zugeordnet. Neu gebucht = Buchung im Zeitraum, geplant = Termin im Zeitraum. Closer: Host des Strategiegesprächs bzw. Owner der Opportunity."

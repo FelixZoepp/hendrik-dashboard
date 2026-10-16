@@ -186,6 +186,12 @@ test("verschieben", () => {
 });
 test("stop", () => {
   for (const t of ["STOP", "Stopp", "abmelden", "stop."]) assert.equal(erkenneAntwort(t), "stop", t);
+  for (const t of ["Bitte per Mail und keine WA", "Kein WhatsApp bitte", "bitte nicht über WhatsApp", "keine Nachrichten mehr"]) {
+    assert.equal(erkenneAntwort(t), "stop", t);
+  }
+  for (const t of ["Ich habe kein Wasser", "Wann ist der Termin?", "Ich kann leider am nächsten Donnerstag ab 15:00"]) {
+    assert.equal(erkenneAntwort(t), null, t);
+  }
 });
 test("sonst null", () => {
   for (const t of ["Wer sind Sie?", "ja aber erst um 11", "Ich bin dabei nicht sicher ob", "stop bitte nicht mehr um 8"]) {

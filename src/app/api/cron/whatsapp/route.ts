@@ -10,7 +10,7 @@ import { berlinTeile } from "@/lib/whatsapp/logik";
 
 // WhatsApp-Terminbot: minütlich per Supabase pg_cron + pg_net (supabase/cron_whatsapp.sql).
 // Arbeitet liegengebliebene Eingänge und fällige Jobs ab (max. ~50 s) und gleicht stündlich
-// den Vorlagen-Status bei Meta ab. Stößt außerdem tagsüber stündlich den Close-Sync an
+// den Vorlagen-Status bei Meta ab. Stößt außerdem tagsüber stündlich den Close- und Calendly-Sync an
 // (Vercel-Cron im Hobby-Tarif nur 1× täglich).
 
 export const maxDuration = 60;
@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     antwort.berichtFehler = message;
   }
 
-  // Close-Sync stündlich anstoßen: läuft als eigener Request (maxDuration 300 s), hier nur auslösen
+  // Close- und Calendly-Sync stündlich anstoßen: laufen als eigene Requests (maxDuration 300 s), hier nur auslösen
   try {
     const stunde = berlinTeile(new Date()).stunde;
     if (stunde >= CLOSE_SYNC_STUNDEN.von && stunde <= CLOSE_SYNC_STUNDEN.bis) {
@@ -69,10 +69,13 @@ export async function GET(request: Request) {
           .from("wa_einstellungen")
           .upsert({ key: CLOSE_SYNC_KEY, wert: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "key" });
         if (error) throw new Error(`Close-Sync-Marker nicht gespeichert: ${error.message}`);
-        const url = new URL("/api/cron/sync-close", request.url);
-        after(() =>
-          fetch(url, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(55_000) }).catch(() => {}),
-        );
+        // Close und Calendly (Absagen/Verschiebungen/neue Buchungen) als eigene Requests
+        for (const pfad of ["/api/cron/sync-close", "/api/cron/sync-calendly"]) {
+          const url = new URL(pfad, request.url);
+          after(() =>
+            fetch(url, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(55_000) }).catch(() => {}),
+          );
+        }
         antwort.closeSync = "angestoßen";
       }
     }

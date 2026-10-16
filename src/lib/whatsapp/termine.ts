@@ -345,7 +345,10 @@ export async function legeAbsagePlatzhalterAn(
   if (error && error.code !== "23505") throw new Error(`Absage-Platzhalter nicht angelegt: ${error.message}`);
 }
 
-/** No-Show: Status „verpasst“, offene Jobs abbrechen, „verpasst“-Nachricht sofort planen. */
+/** Wartezeit vor der „verpasst“-Nachricht: ein voreiliges No-Show-Protokoll kann noch korrigiert werden */
+export const VERPASST_VERZOEGERUNG_MS = 30 * 60_000;
+
+/** No-Show: Status „verpasst“, offene Jobs abbrechen, „verpasst“-Nachricht nach Wartezeit planen. */
 export async function markiereVerpasst(
   svc: SupabaseClient,
   termin: Termin,
@@ -358,7 +361,7 @@ export async function markiereVerpasst(
     .eq("id", termin.id);
   if (error) throw new Error(`No-Show nicht gespeichert: ${error.message}`);
   await brecheJobsAb(svc, [termin.id], "Termin verpasst");
-  await ereignisJob(svc, termin.id, "verpasst", jetzt);
+  await ereignisJob(svc, termin.id, "verpasst", new Date(jetzt.getTime() + VERPASST_VERZOEGERUNG_MS));
 }
 
 /** Gespräch hat stattgefunden (Protokoll in Close): offene Jobs abbrechen. */
@@ -385,6 +388,26 @@ export async function terminZumErgebnisProtokoll(svc: SupabaseClient, protokollI
 }
 
 /** Zuletzt begonnener, noch offener Termin eines Close-Leads (für No-Show/Stattgefunden). */
+/** Als verpasst markierter Termin des Leads aus den letzten 24 Std. (für ein korrigiertes No-Show-Protokoll). */
+export async function verpassterTerminDesLeads(
+  svc: SupabaseClient,
+  leadId: string,
+  art: TerminArt,
+  jetzt: Date = new Date(),
+): Promise<Termin | null> {
+  const { data, error } = await svc
+    .from("wa_termine")
+    .select("*")
+    .eq("close_lead_id", leadId)
+    .eq("art", art)
+    .eq("status", "verpasst")
+    .gte("start_at", new Date(jetzt.getTime() - 24 * 60 * 60_000).toISOString())
+    .order("start_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(`Terminsuche fehlgeschlagen: ${error.message}`);
+  return ((data as Termin[] | null) ?? [])[0] ?? null;
+}
+
 export async function letzterTerminDesLeads(
   svc: SupabaseClient,
   leadId: string,

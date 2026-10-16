@@ -78,6 +78,9 @@ export interface CProtokoll {
   fields: Record<string, unknown> | null;
 }
 
+/** Cold Call: „Nächster Schritt“ bei erreichtem Entscheider (Wert „Setting vereinbart am:“ = Termin gelegt) */
+const CC_ENTSCHEIDER_FELD = "custom.cf_rYzdqWeplRWv7FFbrhgaXOhKSUxhYgopFVpUmLHFruf";
+
 /** Feld „Nächster Schritt“ je Protokolltyp und der Wert für No-Show (so in Close gepflegt) */
 const PROTOKOLL_ERGEBNIS = {
   erst: { typ: PROTOKOLL.setting, feld: "custom.cf_6Kt9RVMkQiuDOXBiiTRrKg8DTwvoQn8EEBCXmaTykGZ", noShow: "No-Show" },
@@ -161,6 +164,21 @@ function berlinSlot(iso: string): { tag: number; stunde: number } {
 export interface Kpi {
   value: number | null;
   prev: number | null;
+}
+
+/** Opener-Auswertung: Termine aus Cold-Call-Protokollen („Setting vereinbart am:“) im Zeitraum und was daraus wurde */
+export interface OpenerZeile {
+  userId: string;
+  name: string;
+  termineGelegt: number;
+  stattgefunden: number;
+  noShow: number;
+  /** noch kein Setting-Protokoll (Termin steht aus oder wurde nicht protokolliert) */
+  offen: number;
+  showRate: number | null;
+  closingsGelegt: number;
+  deals: number;
+  umsatz: number;
 }
 
 export interface FunnelStufe {
@@ -281,7 +299,17 @@ export interface ControllingReport {
     leadsErreicht: number;
     termine: Record<
       "erst" | "strategie",
-      { neu: Kpi; geplant: number; stattgefunden: Kpi; noShow: number; abgesagt: number; ohneProtokoll: number; showRate: number | null }
+      {
+        neu: Kpi;
+        geplant: number;
+        stattgefunden: Kpi;
+        noShow: number;
+        abgesagt: number;
+        /** davon verschoben: dieselbe Person hat danach neu gebucht */
+        verschoben: number;
+        ohneProtokoll: number;
+        showRate: number | null;
+      }
     >;
     showRateErst: Kpi;
     onboardings: Kpi;
@@ -294,6 +322,7 @@ export interface ControllingReport {
   absagegruende: { grund: string; anzahl: number }[];
   /** Ergebnisse („Nächster Schritt“) der Close-Protokolle im Zeitraum, je Lead das letzte */
   protokollErgebnisse: Record<"erst" | "strategie", { wert: string; anzahl: number; noShow: boolean }[]>;
+  opener: OpenerZeile[];
   absagenVorlauf: { ueber24h: number; unter24h: number; unter2h: number };
   kommend: { name: string; typ: string; start: string }[];
   heatmapAnrufe: { tag: number; stunde: number; count: number }[];
@@ -379,12 +408,28 @@ export function buildReport(input: ControllingInput): ControllingReport {
     const e = ergebnisse(t, periodStart, now);
     const ePrev = hasPrev ? ergebnisse(t, prevStart!, prevEnd!) : null;
     const nichtAbgesagt = geplant.filter((x) => x.status === "active").length;
+    const abgesagt = geplant.filter((x) => x.status === "canceled");
+    // Verschoben = dieselbe Person hat nach dieser Buchung einen weiteren Termin gleichen Typs gebucht
+    const verschoben = abgesagt.filter((x) => {
+      const email = x.invitee_email?.toLowerCase();
+      return (
+        !!email &&
+        input.events.some(
+          (y) =>
+            y !== x &&
+            y.invitee_email?.toLowerCase() === email &&
+            terminTyp(y.event_type_name) === t &&
+            (y.created_at ?? "") > (x.created_at ?? ""),
+        )
+      );
+    }).length;
     return {
       neu: { value: neuGebucht(t, periodStart, now), prev: hasPrev ? neuGebucht(t, prevStart!, prevEnd!) : null },
       geplant: geplant.length,
       stattgefunden: { value: e.erschienen, prev: ePrev ? ePrev.erschienen : null },
       noShow: e.noShow,
-      abgesagt: geplant.filter((x) => x.status === "canceled").length,
+      abgesagt: abgesagt.length,
+      verschoben,
       ohneProtokoll: Math.max(0, nichtAbgesagt - e.erschienen - e.noShow),
       showRate: ratio(e.erschienen, e.erschienen + e.noShow),
     };
@@ -527,6 +572,47 @@ export function buildReport(input: ControllingInput): ControllingReport {
     .sort((a, b) => b.anzahl - a.anzahl);
 
   // --- Team ---
+  // --- Opener: gelegte Termine laut Cold-Call-Protokoll → Setting-Ergebnis → Closing/Deal (Lead-basiert) ---
+  const settingNachLead = new Map<string, CProtokoll[]>();
+  for (const p of input.protokolle) {
+    if (p.custom_activity_type_id !== PROTOKOLL_ERGEBNIS.erst.typ || !p.fields?.[PROTOKOLL_ERGEBNIS.erst.feld]) continue;
+    settingNachLead.set(p.lead_id, [...(settingNachLead.get(p.lead_id) ?? []), p]);
+  }
+  const gelegt = new Map<string, { userId: string; datum: string }>();
+  for (const p of input.protokolle) {
+    if (p.custom_activity_type_id !== PROTOKOLL.coldCall || !p.user_id) continue;
+    if (p.fields?.[CC_ENTSCHEIDER_FELD] !== "Setting vereinbart am:" || !inRange(p.date_created, periodStart, now)) continue;
+    const alt = gelegt.get(p.lead_id);
+    if (!alt || alt.datum < p.date_created) gelegt.set(p.lead_id, { userId: p.user_id, datum: p.date_created });
+  }
+  const openerMap = new Map<string, OpenerZeile>();
+  for (const [leadId, g] of gelegt) {
+    const z =
+      openerMap.get(g.userId) ??
+      {
+        userId: g.userId,
+        name: input.users.find((u) => u.close_id === g.userId)?.name ?? "Unbekannt",
+        termineGelegt: 0, stattgefunden: 0, noShow: 0, offen: 0, showRate: null, closingsGelegt: 0, deals: 0, umsatz: 0,
+      };
+    z.termineGelegt++;
+    // letztes Setting-Protokoll nach dem Legen entscheidet
+    const s = (settingNachLead.get(leadId) ?? []).filter((p) => p.date_created > g.datum).sort((a, b) => a.date_created.localeCompare(b.date_created)).pop();
+    const wert = s ? String(s.fields![PROTOKOLL_ERGEBNIS.erst.feld]) : null;
+    if (!wert) z.offen++;
+    else if (wert === PROTOKOLL_ERGEBNIS.erst.noShow) z.noShow++;
+    else {
+      z.stattgefunden++;
+      if (wert === "Closing gelegt am:") z.closingsGelegt++;
+    }
+    const gewonnen = input.opps.filter((o) => o.lead_id === leadId && o.status_type === "won");
+    z.deals += gewonnen.length;
+    z.umsatz += sum(gewonnen, (o) => o.value ?? 0);
+    openerMap.set(g.userId, z);
+  }
+  const opener = [...openerMap.values()]
+    .map((z) => ({ ...z, showRate: ratio(z.stattgefunden, z.stattgefunden + z.noShow) }))
+    .sort((a, b) => b.termineGelegt - a.termineGelegt);
+
   const team: TeamZeile[] = input.users
     .map((u) => {
       const uc = calls.filter((c) => c.user_id === u.close_id);
@@ -701,6 +787,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
     team,
     termine,
     protokollErgebnisse,
+    opener,
     absagegruende: [...gruende.entries()].map(([grund, anzahl]) => ({ grund, anzahl })).sort((a, b) => b.anzahl - a.anzahl),
     absagenVorlauf,
     kommend: kommendeEvents.slice(0, 6).map((e) => ({

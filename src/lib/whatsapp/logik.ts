@@ -280,6 +280,8 @@ export function artAusCalendly(eventTypeName: string | null | undefined): Termin
 export type AntwortArt = "bestaetigen" | "verschieben" | "stop" | null;
 
 const STOP_WOERTER = new Set(["stop", "stopp", "abmelden", "abbestellen", "austragen", "unsubscribe"]);
+/** Ausdrücklicher Wunsch, nicht per WhatsApp angeschrieben zu werden („Bitte per Mail und keine WA“) */
+const KEIN_WHATSAPP = /\b(kein(e|en)?|nicht (mehr )?(per|über|via)|nicht mehr)\s*(wa|whats\s?app)\b|\b(keine|nicht mehr)\s+(nachrichten|whatsapps?)\b/;
 const JA_WOERTER = new Set([
   "ja",
   "jap",
@@ -308,7 +310,7 @@ export function erkenneAntwort(text: string | null | undefined): AntwortArt {
     .replace(/[!.,?✅👍🏻👍🏼👍🏽👍🏾👍🏿\s]+$/gu, "")
     .replace(/\s+/g, " ");
   const original = text.trim();
-  if (STOP_WOERTER.has(t)) return "stop";
+  if (STOP_WOERTER.has(t) || KEIN_WHATSAPP.test(t)) return "stop";
   if (t.includes("verschieben") || t.includes("anderen termin") || t.includes("neuen termin")) return "verschieben";
   if (t.includes("ich bin dabei") || JA_WOERTER.has(t) || /^👍/u.test(original)) return "bestaetigen";
   if (/^(ja|jap|jo)[, ]+(passt|ich bin dabei|bin dabei|ich komme|bestätigt|gerne|klar)/.test(t)) return "bestaetigen";
