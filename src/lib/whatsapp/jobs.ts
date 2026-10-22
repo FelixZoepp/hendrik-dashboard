@@ -61,6 +61,8 @@ export function vorlagenWerte(v: VorlageDef, t: Termin, jetzt: Date): string[] {
         return metaParameter(erinnerungsTag(start, jetzt));
       case "ort":
         return metaParameter(t.ort_text || ORT_FALLBACK_STRATEGIE);
+      case "report":
+        return metaParameter(null);
     }
   });
 }

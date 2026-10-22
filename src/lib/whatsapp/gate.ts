@@ -118,7 +118,8 @@ export async function pruefeVersand(svc: SupabaseClient, o: PruefOpts): Promise<
     if (status !== "APPROVED") {
       return { ok: false, grund: `Vorlage ${o.vorlage.name} ist bei Meta nicht freigegeben (${status ?? "nicht eingereicht"})` };
     }
-    if (kategorie?.toUpperCase() !== "UTILITY") {
+    const erlaubt = o.vorlage.marketingErlaubt ? ["UTILITY", "MARKETING"] : ["UTILITY"];
+    if (!erlaubt.includes(kategorie?.toUpperCase() ?? "")) {
       return {
         ok: false,
         grund: kategorie
@@ -409,4 +410,80 @@ export function istDirektesVideo(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Funnel-Vorlage senden (PDF-Report bzw. Erinnerung „Termin buchen“) — gleiche Prüfung und
+ * Reservierung wie bei Terminen: Bot an bzw. Testnummer, Vorlage eingeschaltet + freigegeben,
+ * Einwilligung, keine Abmeldung. Knopf-Links gehen auf /b/<token> der Eintragung.
+ */
+export async function sendeFunnelVorlage(
+  svc: SupabaseClient,
+  o: {
+    telefon: string;
+    closeLeadId: string | null;
+    optIn: boolean;
+    vorlage: VorlageDef;
+    werte: string[];
+    token: string;
+    schluessel: string;
+    dokument?: { link: string; dateiname: string };
+    ruhezeit: { spaetestens: Date | null } | false;
+    jetzt?: Date;
+  },
+): Promise<SendeErgebnis> {
+  const pruefung = await pruefeVersand(svc, {
+    telefon: o.telefon,
+    vorlage: o.vorlage,
+    termin: { opt_in: o.optIn },
+    ruhezeit: o.ruhezeit,
+    jetzt: o.jetzt,
+  });
+  if (!pruefung.ok) return { gesendet: false, grund: pruefung.grund, verschiebenAuf: pruefung.verschiebenAuf };
+  if (o.vorlage.headerDokument && !o.dokument) return { gesendet: false, grund: "Kein PDF hinterlegt" };
+
+  const components: Array<Record<string, unknown>> = [];
+  if (o.vorlage.headerDokument && o.dokument) {
+    components.push({
+      type: "header",
+      parameters: [{ type: "document", document: { link: o.dokument.link, filename: o.dokument.dateiname } }],
+    });
+  }
+  components.push({ type: "body", parameters: o.werte.map((text) => ({ type: "text", text })) });
+  o.vorlage.buttons.forEach((b, index) => {
+    if (b.typ === "URL") {
+      components.push({ type: "button", sub_type: "url", index: String(index), parameters: [{ type: "text", text: o.token }] });
+    }
+  });
+  const body = `${o.dokument ? `[PDF] ${o.dokument.dateiname}\n` : ""}${renderBody(o.vorlage, o.werte)}`;
+
+  const zeileId = await reserviere(svc, {
+    richtung: "aus",
+    telefon: o.telefon,
+    termin_id: null,
+    close_lead_id: o.closeLeadId,
+    typ: "template",
+    vorlage: o.vorlage.name,
+    body,
+    versand_schluessel: o.schluessel,
+    payload: { components },
+  });
+  if (!zeileId) return { gesendet: false, grund: "bereits gesendet" };
+
+  let waMessageId: string;
+  try {
+    waMessageId = await sendeVorlageRoh(waNummer(o.telefon), o.vorlage.name, o.vorlage.sprache, components);
+  } catch (err) {
+    const fehler = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+    if (err instanceof MetaFehler && err.eindeutig) {
+      await svc.from("wa_nachrichten").update({ status: "fehlgeschlagen", fehler }).eq("id", zeileId).eq("status", "reserviert");
+      throw new OhneWiederholung(`WhatsApp abgelehnt: ${fehler}`);
+    }
+    await svc.from("wa_nachrichten").update({ fehler: `Ergebnis unklar: ${fehler}` }).eq("id", zeileId);
+    throw new VersandUnklar(`Ergebnis unklar (kein automatischer Neuversand): ${fehler}`);
+  }
+  const { error: uFehler } = await svc.from("wa_nachrichten").update({ status: "gesendet", wa_message_id: waMessageId }).eq("id", zeileId);
+  if (uFehler) console.error("[whatsapp] Versand nicht protokolliert:", uFehler.message);
+  await notizSicher(o.closeLeadId, `WhatsApp gesendet: ${o.vorlage.name}\n\n${body}`);
+  return { gesendet: true, waMessageId };
 }

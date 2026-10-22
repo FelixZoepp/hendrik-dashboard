@@ -374,7 +374,7 @@ export default async function WhatsappBotPage({
                   {an ? "Eingeschaltet" : "Ausgeschaltet"}
                   {s?.geprueft_am && <> · geprüft {zeit(s.geprueft_am)}</>}
                 </p>
-                {s?.kategorie && s.kategorie !== "UTILITY" && (
+                {s?.kategorie && s.kategorie !== "UTILITY" && !(v.marketingErlaubt && s.kategorie === "MARKETING") && (
                   <p className="mt-1 text-xs font-medium text-destructive">
                     Von Meta auf {s.kategorie === "MARKETING" ? "Marketing" : s.kategorie} umgestuft — wird nicht gesendet
                   </p>
@@ -384,6 +384,7 @@ export default async function WhatsappBotPage({
                 <details className="mt-2 text-sm">
                   <summary className="cursor-pointer text-muted-foreground">Text ansehen</summary>
                   <div className="mt-2 space-y-1 rounded-xl bg-muted p-3">
+                    {v.headerDokument && <p className="font-semibold">📄 PDF-Report (aus /sales/funnels)</p>}
                     {v.header && <p className="font-semibold">{v.header}</p>}
                     <p className="whitespace-pre-line">{v.body}</p>
                     <p className="text-xs text-muted-foreground">{v.footer}</p>

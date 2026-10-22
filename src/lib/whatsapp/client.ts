@@ -168,3 +168,33 @@ export async function listeVorlagenMeta(): Promise<MetaVorlage[]> {
   }
   return alle;
 }
+
+/** App „Assistenz Chat“ (Upload-API für Beispiel-Medien beim Einreichen) */
+const STANDARD_APP_ID = "1991271344890384";
+
+/**
+ * Beispiel-PDF für eine Vorlage mit Dokument-Header hochladen (Resumable Upload API) → Handle „4::…“.
+ * Nur beim Einreichen (Knopf im Dashboard).
+ */
+export async function ladeBeispielDokumentHoch(pdfUrl: string): Promise<string> {
+  const token = process.env.WHATSAPP_TOKEN;
+  if (!token) throw new Error("WHATSAPP_TOKEN fehlt");
+  const appId = process.env.META_APP_ID || STANDARD_APP_ID;
+  const pdf = await fetch(pdfUrl, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+  if (!pdf.ok) throw new Error(`PDF nicht abrufbar (${pdf.status}): ${pdfUrl}`);
+  const daten = new Uint8Array(await pdf.arrayBuffer());
+  const sitzung = await graph<{ id?: string }>(
+    `/${appId}/uploads?file_length=${daten.byteLength}&file_type=application/pdf&file_name=beispiel.pdf`,
+    { method: "POST" },
+  );
+  if (!sitzung?.id) throw new Error("Meta hat keine Upload-Sitzung geliefert");
+  const res = await fetch(`${graphBasis()}/${sitzung.id}`, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${token}`, file_offset: "0" },
+    body: daten,
+    signal: AbortSignal.timeout(30_000),
+  });
+  const j = (await res.json().catch(() => null)) as { h?: string; error?: { message?: string } } | null;
+  if (!res.ok || !j?.h) throw new Error(`PDF-Upload bei Meta fehlgeschlagen (${res.status}): ${j?.error?.message ?? "ohne Handle"}`);
+  return j.h;
+}

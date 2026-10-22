@@ -570,10 +570,11 @@ console.log("Vorlagen (Meta-Regeln)");
 for (const v of VORLAGEN) {
   test(`${v.name}: Regeln eingehalten`, () => assert.deepEqual(pruefeVorlage(v), []));
 }
-test("8 Vorlagen, alle UTILITY/de, Sie-Form", () => {
-  assert.equal(VORLAGEN.length, 8);
+test("10 Vorlagen (8 Termin + 2 Funnel), Termin-Vorlagen UTILITY, alle de, Sie-Form", () => {
+  assert.equal(VORLAGEN.length, 10);
   for (const v of VORLAGEN) {
-    assert.equal(v.kategorie, "UTILITY");
+    if (v.typ.startsWith("funnel_")) assert.equal(v.marketingErlaubt, true);
+    else assert.equal(v.kategorie, "UTILITY");
     assert.equal(v.sprache, "de");
     assert.ok(v.body.startsWith("Guten Tag {{1}},"), v.name);
     assert.ok(!/\b(du|dein|dich|dir)\b/i.test(v.body), `${v.name} enthält Du-Form`);

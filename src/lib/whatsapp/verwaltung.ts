@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { listeVorlagenMeta, reicheVorlageEinMeta, terminBasisUrl } from "./client";
+import { ladeBeispielDokumentHoch, listeVorlagenMeta, reicheVorlageEinMeta, terminBasisUrl } from "./client";
+import { ladeFunnelEinstellungen } from "@/lib/funnel/einstellungen";
 import { speichereEinstellung } from "./einstellungen";
 import { metaDefinition, pruefeVorlage, VORLAGEN, vorlageNachName } from "./vorlagen";
 
@@ -14,7 +15,14 @@ export async function reicheVorlageEin(svc: SupabaseClient, name: string): Promi
   const probleme = pruefeVorlage(v);
   if (probleme.length) throw new Error(`Vorlage ${name} verletzt Meta-Regeln: ${probleme.join("; ")}`);
 
-  const r = await reicheVorlageEinMeta(metaDefinition(v, terminBasisUrl()));
+  let handle: string | undefined;
+  if (v.headerDokument) {
+    // Beispiel-PDF: erster Funnel mit hinterlegtem Report
+    const pdf = Object.values((await ladeFunnelEinstellungen(svc)).funnels).find((f) => f.report_url)?.report_url;
+    if (!pdf) throw new Error("Erst bei einem Funnel das Report-PDF hinterlegen (/sales/funnels) – Meta braucht ein Beispiel");
+    handle = await ladeBeispielDokumentHoch(pdf);
+  }
+  const r = await reicheVorlageEinMeta(metaDefinition(v, terminBasisUrl(), handle));
   const jetzt = new Date().toISOString();
   const { error } = await svc.from("wa_vorlagen").upsert(
     {

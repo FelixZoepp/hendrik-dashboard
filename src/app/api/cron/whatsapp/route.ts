@@ -4,6 +4,7 @@ import { waVerbindung } from "@/lib/whatsapp/client";
 import { ladeEinstellungen, speichereEinstellung } from "@/lib/whatsapp/einstellungen";
 import { verarbeiteOffeneEingaenge } from "@/lib/whatsapp/eingang";
 import { verarbeiteJobs } from "@/lib/whatsapp/jobs";
+import { verarbeiteFunnel } from "@/lib/funnel/automatik";
 import { gleicheVorlagenAb } from "@/lib/whatsapp/verwaltung";
 import { sendeFaelligeBerichte } from "@/lib/sales-bericht";
 import { berlinTeile } from "@/lib/whatsapp/logik";
@@ -46,6 +47,15 @@ export async function GET(request: Request) {
     const message = err instanceof Error ? err.message : String(err);
     await supabase.from("webhook_errors").insert({ endpoint: "whatsapp", payload: { cron: "jobs" }, error: message });
     antwort.jobsFehler = message;
+  }
+
+  // Funnel-Eintragungen: Close, PDF-Report, 10-Min.-Prüfung, Erinnerung (Schalter auf /sales/funnels)
+  try {
+    if (deadline - Date.now() >= 20_000) antwort.funnel = await verarbeiteFunnel(supabase, { deadline });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    await supabase.from("webhook_errors").insert({ endpoint: "perspective", payload: { cron: "funnel" }, error: message });
+    antwort.funnelFehler = message;
   }
 
   // Sales-Auswertung nach Slack: Mo–Fr 19:00 (freitags + Woche), einmal pro Tag

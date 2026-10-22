@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:whatsapp": "node --no-warnings scripts/test-whatsapp-logik.mjs",
     "test:gespraeche": "node --no-warnings scripts/test-gespraeche.mjs",
-    "test:verlustgrund": "node --no-warnings scripts/test-verlustgrund.mjs"
+    "test:verlustgrund": "node --no-warnings scripts/test-verlustgrund.mjs",
+    "test:funnel": "node --no-warnings scripts/test-funnel.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

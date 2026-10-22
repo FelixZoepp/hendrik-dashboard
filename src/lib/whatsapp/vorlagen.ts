@@ -20,23 +20,30 @@ export type VorlagenName =
   | "hs_strategie_erinnerung"
   | "hs_strategie_gleich"
   | "hs_termin_verpasst"
-  | "hs_termin_abgesagt";
+  | "hs_termin_abgesagt"
+  | "hs_funnel_report"
+  | "hs_funnel_termin";
 
 export type VorlagenButton =
   | { typ: "QUICK_REPLY"; text: string; aktion: "bestaetigen" | "verschieben" }
-  | { typ: "URL"; text: string; pfad: "t" | "j" | "n" };
+  | { typ: "URL"; text: string; pfad: "t" | "j" | "n" | "b" };
 
 /** Welche Werte in {{1}}, {{2}} … landen (Reihenfolge = Platzhalter-Nummer). */
-export type VorlagenWert = "name" | "datum" | "uhrzeit" | "tag" | "ort";
+export type VorlagenWert = "name" | "datum" | "uhrzeit" | "tag" | "ort" | "report";
 
 export interface VorlageDef {
   name: VorlagenName;
   /** null = für beide Terminarten */
   art: "erstgespraech" | "strategie" | null;
-  typ: "gebucht" | "erinnerung" | "gleich" | "verpasst" | "abgesagt";
-  kategorie: "UTILITY";
+  typ: "gebucht" | "erinnerung" | "gleich" | "verpasst" | "abgesagt" | "funnel_report" | "funnel_termin";
+  /** Kategorie beim Einreichen */
+  kategorie: "UTILITY" | "MARKETING";
+  /** Darf auch gesendet werden, wenn Meta die Vorlage als MARKETING einstuft (nur Funnel-Vorlagen mit Einwilligung) */
+  marketingErlaubt?: boolean;
   sprache: "de";
   header?: string;
+  /** Header = PDF-Dokument (Link wird beim Senden mitgegeben, beim Einreichen ein Beispiel-PDF hochgeladen) */
+  headerDokument?: boolean;
   body: string;
   footer: string;
   werte: VorlagenWert[];
@@ -180,6 +187,40 @@ export const VORLAGEN: VorlageDef[] = [
     beispiele: ["Markus Müller", "Donnerstag, 16.10.", "10:30"],
     buttons: [{ typ: "URL", text: "Neuen Termin wählen", pfad: "n" }],
   },
+  {
+    name: "hs_funnel_report",
+    art: null,
+    typ: "funnel_report",
+    kategorie: "UTILITY",
+    marketingErlaubt: true,
+    sprache: "de",
+    headerDokument: true,
+    body:
+      "Guten Tag {{1}}, vielen Dank für Ihre Anfrage. Wie gewünscht erhalten Sie hier Ihren Report „{{2}}“ " +
+      "der Hoffmann Solutions GmbH als PDF.\n\n" +
+      "Wenn Sie besprechen möchten, wie Sie die Inhalte in Ihrem Betrieb umsetzen, buchen Sie sich gerne " +
+      "ein kostenfreies Erstgespräch über den Knopf.",
+    footer: FOOTER_STOP,
+    werte: ["name", "report"],
+    beispiele: ["Markus Müller", "So gewinnen Handwerksbetriebe neue Kunden"],
+    buttons: [{ typ: "URL", text: "Erstgespräch buchen", pfad: "b" }],
+  },
+  {
+    name: "hs_funnel_termin",
+    art: null,
+    typ: "funnel_termin",
+    kategorie: "MARKETING",
+    marketingErlaubt: true,
+    sprache: "de",
+    body:
+      "Guten Tag {{1}}, vielen Dank für Ihre Eintragung bei der Hoffmann Solutions GmbH. " +
+      "Ein Schritt fehlt noch: Wählen Sie über den Knopf einen passenden Termin für Ihr kostenfreies Erstgespräch – " +
+      "das dauert nur eine Minute. Ein Handwerksberater aus unserem Team ruft Sie dann zur gewählten Zeit an.",
+    footer: FOOTER_STOP,
+    werte: ["name"],
+    beispiele: ["Markus Müller"],
+    buttons: [{ typ: "URL", text: "Termin auswählen", pfad: "b" }],
+  },
 ];
 
 export const VORLAGEN_NAMEN = VORLAGEN.map((v) => v.name);
@@ -200,7 +241,13 @@ export const AUFGABEN = {
   nichtZugestellt: "WhatsApp nicht zugestellt – Nummer prüfen und anrufen",
 };
 
+/** Funnel-Vorlagen (Report-Versand, Erinnerung „Termin buchen“) */
+export function funnelVorlage(typ: "funnel_report" | "funnel_termin"): VorlageDef {
+  return VORLAGEN.find((v) => v.typ === typ)!;
+}
+
 export function vorlageFuer(art: "erstgespraech" | "strategie", typ: VorlageDef["typ"]): VorlageDef | undefined {
+  if (typ === "funnel_report" || typ === "funnel_termin") return undefined;
   return VORLAGEN.find((v) => v.typ === typ && (v.art === null || v.art === art));
 }
 
@@ -216,11 +263,14 @@ export function renderBody(v: VorlageDef, werte: string[]): string {
 /** Beispiel-Token für die Meta-Prüfung der URL-Buttons. */
 const BEISPIEL_TOKEN = "Ab3dEf7hJk9mNp";
 
-/** Definition für POST /{waba_id}/message_templates. */
-export function metaDefinition(v: VorlageDef, basisUrl: string) {
+/** Definition für POST /{waba_id}/message_templates. dokumentHandle = Upload-Handle des Beispiel-PDFs (headerDokument). */
+export function metaDefinition(v: VorlageDef, basisUrl: string, dokumentHandle?: string) {
   const basis = basisUrl.replace(/\/+$/, "");
   const components: Array<Record<string, unknown>> = [];
-  if (v.header) components.push({ type: "HEADER", format: "TEXT", text: v.header });
+  if (v.headerDokument) {
+    if (!dokumentHandle) throw new Error(`Vorlage ${v.name} braucht ein Beispiel-PDF (Upload-Handle)`);
+    components.push({ type: "HEADER", format: "DOCUMENT", example: { header_handle: [dokumentHandle] } });
+  } else if (v.header) components.push({ type: "HEADER", format: "TEXT", text: v.header });
   components.push({ type: "BODY", text: v.body, example: { body_text: [v.beispiele] } });
   components.push({ type: "FOOTER", text: v.footer });
   components.push({
