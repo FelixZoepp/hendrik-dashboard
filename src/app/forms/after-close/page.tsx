@@ -21,7 +21,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { formularAbsenden } from "../actions";
 
 const STEPS = [
   "Firmendaten",
@@ -42,46 +42,14 @@ export default function AfterCloseFormPage() {
 
   async function handleSubmit() {
     setLoading(true);
-    const supabase = createClient();
 
-    const { error } = await supabase.from("form_submissions").insert({
-      typ: "after_close",
-      payload: data,
-    });
+    // Speichern + Auto-Aktivierung laufen auf dem Server (Firma aus der Anmeldung bzw. „Als Kunde ansehen“)
+    const { error } = await formularAbsenden("after_close", data).catch(() => ({ error: "Netzwerkfehler" }));
 
     if (error) {
-      toast.error("Fehler beim Absenden", { description: error.message });
+      toast.error("Fehler beim Absenden", { description: error });
       setLoading(false);
       return;
-    }
-
-    // Auto-Aktivierung: Company auf "aktiv" setzen + Projekte aus Templates erzeugen
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("company_id")
-          .eq("id", user.id)
-          .single();
-
-        if (profile?.company_id) {
-          await fetch("/api/automation/activate-company", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
-            },
-            body: JSON.stringify({ company_id: profile.company_id }),
-          });
-        }
-      }
-    } catch {
-      // Aktivierung fehlgeschlagen — Formular trotzdem als gesendet werten
-      console.error("Auto-Aktivierung fehlgeschlagen");
     }
 
     toast.success("Formular erfolgreich gesendet!");

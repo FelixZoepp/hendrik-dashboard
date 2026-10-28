@@ -51,6 +51,12 @@ test("Webhooks, Crons, Auth-API, Automation", () => {
 test("Token-Links /b /j /n /t (+ics)", () => {
   for (const p of ["/b/abc", "/j/abc", "/n/abc", "/t/abc", "/t/abc/ics"]) assert.equal(istOeffentlicherPfad(p), true, p);
 });
+test("Kalender-Abo /api/kalender/<token>.ics öffentlich, /kalender ist Kundenseite", () => {
+  assert.equal(istOeffentlicherPfad("/api/kalender/abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG.ics"), true);
+  assert.equal(istOeffentlicherPfad("/kalender"), false);
+  assert.equal(bereichFuer("/kalender"), "kunde");
+  assert.equal(bereichFuer("/api/kalenderx"), "api");
+});
 test("Statische Dateien", () => {
   for (const p of ["/reports/handwerksreport-2027.pdf", "/logo.png", "/icon.svg", "/favicon.ico", "/_next/static/x.js"])
     assert.equal(istOeffentlicherPfad(p), true, p);

@@ -20,7 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { formularAbsenden } from "../actions";
 import { CheckCircle2 } from "lucide-react";
 
 export default function ZugaengeFormPage() {
@@ -41,11 +41,7 @@ export default function ZugaengeFormPage() {
     }
 
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("form_submissions").insert({
-      typ: "zugaenge",
-      payload: data,
-    });
+    const { error } = await formularAbsenden("zugaenge", data).catch(() => ({ error: "Netzwerkfehler" }));
 
     if (error) {
       toast.error("Fehler beim Absenden");

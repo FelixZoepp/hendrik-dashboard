@@ -22,6 +22,8 @@ import { TerminRueckmeldung } from "@/components/auswertung/termin-karten";
 import { AnrufenKnopf } from "@/components/crm/kontakt-knoepfe";
 import { ladeTerminAufgaben } from "@/lib/auswertung/daten";
 import { zeitpunktText } from "@/lib/crm/logik";
+import { ladeOnboarding } from "@/lib/onboarding/daten";
+import { OnboardingKarte } from "@/components/onboarding/onboarding-karte";
 import type { LeadStatus } from "@/lib/types/database";
 
 export const metadata: Metadata = {
@@ -47,7 +49,7 @@ export default async function ClientDashboardPage({
   const { von, bis } = zeitraumGrenzen(zeitraum, jetzt);
   const db = createAdminClient();
 
-  const [anrufRes, kennRes, aufgaben] = await Promise.all([
+  const [anrufRes, kennRes, aufgaben, onboarding] = await Promise.all([
     db
       .from("leads")
       .select("id, vorname, nachname, ort, anliegen, telefon, status, created_at, first_contact_at, naechste_aktion_am, kontakt_versuche")
@@ -65,6 +67,7 @@ export default async function ClientDashboardPage({
       .lte("created_at", bis.toISOString())
       .eq("lead_activities.typ", "status_wechsel"),
     ladeTerminAufgaben(db, ctx.companyId, jetzt),
+    ladeOnboarding(db, ctx.companyId).catch(() => null),
   ]);
 
   const anrufe = heuteAnrufen((anrufRes.data ?? []) as AnrufZeile[], jetzt);
@@ -107,6 +110,8 @@ export default async function ClientDashboardPage({
         <h1 className="fern-page-title">Hallo{ctx.profile.full_name && !ctx.impersoniert ? ` ${ctx.profile.full_name.split(" ")[0]}` : ""}!</h1>
         <p className="text-sm text-muted-foreground">{ctx.company.name}</p>
       </div>
+
+      {onboarding && <OnboardingKarte stand={onboarding} />}
 
       {/* Heute anrufen */}
       <section className="fern-card space-y-3 p-5">

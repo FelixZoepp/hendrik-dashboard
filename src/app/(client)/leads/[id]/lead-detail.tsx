@@ -43,6 +43,7 @@ import { AnrufenKnopf, WhatsAppKnopf } from "@/components/crm/kontakt-knoepfe";
 import { RueckrufWahl } from "@/components/crm/rueckruf-wahl";
 import { useStufenWechsel } from "@/components/crm/stufen-wechsel";
 import { TermineBereich, type TerminZeile } from "@/components/auswertung/termin-karten";
+import { TerminLinkKnopf } from "@/components/kalender/termin-link-knopf";
 import type { AnrufErgebnis } from "@/lib/auswertung/logik";
 import { addLeadActivity, anrufErgebnis, nichtErreicht, rueckrufSetzen, zustaendigSetzen } from "../actions";
 import type { Lead, LeadActivity, LeadActivityTyp } from "@/lib/types/database";
@@ -57,6 +58,8 @@ interface LeadDetailProps {
   anrufFrage?: boolean;
   termine: TerminZeile[];
   jetztIso: string;
+  /** Eigener Buchungslink der Firma (Seite /kalender) – nur zum Kopieren */
+  buchungslink?: string | null;
 }
 
 const NICHT_ERREICHT_KNOEPFE: { wert: AnrufErgebnis; label: string; icon: typeof Phone; erfolg: string }[] = [
@@ -75,7 +78,7 @@ function Bereich({ titel, children, className }: { titel: string; children: Reac
   );
 }
 
-export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, anrufFrage, termine, jetztIso }: LeadDetailProps) {
+export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, anrufFrage, termine, jetztIso, buchungslink }: LeadDetailProps) {
   const router = useRouter();
   const stufe = stufenInfo(stufeVon(lead.status));
   const { starte, dialog, laeuft: stufeLaeuft } = useStufenWechsel();
@@ -151,6 +154,8 @@ export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, an
       ) : (
         <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">Keine Telefonnummer hinterlegt.</p>
       )}
+
+      {buchungslink && <TerminLinkKnopf link={buchungslink} vorname={lead.vorname} firmenName={firmenName} />}
 
       {/* Ergebnis des Anrufs */}
       {frage && (

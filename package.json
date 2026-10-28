@@ -16,7 +16,9 @@
     "test:eingang": "node --no-warnings scripts/test-eingang.mjs",
     "test:crm": "node --no-warnings scripts/test-crm.mjs",
     "test:masterclass": "node --no-warnings scripts/test-masterclass.mjs",
-    "test:auswertung": "node --no-warnings scripts/test-auswertung.mjs"
+    "test:auswertung": "node --no-warnings scripts/test-auswertung.mjs",
+    "test:onboarding": "node --no-warnings scripts/test-onboarding.mjs",
+    "test:kalender": "node --no-warnings scripts/test-kalender.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

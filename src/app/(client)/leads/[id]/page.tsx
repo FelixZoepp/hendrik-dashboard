@@ -6,6 +6,7 @@ import { istUuid } from "@/lib/zugriff";
 import { LeadDetail } from "./lead-detail";
 import type { Lead, LeadActivity } from "@/lib/types/database";
 import type { TerminZeile } from "@/components/auswertung/termin-karten";
+import { ladeBuchungslink } from "@/lib/kalender/daten";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export default async function LeadDetailPage({
   const lead = leadRow as Lead;
 
   // Kind-Tabelle erst nach Prüfung des Elternteils (Lead gehört zur Firma)
-  const [aktRes, personenRes, termineRes] = await Promise.all([
+  const [aktRes, personenRes, termineRes, buchungslink] = await Promise.all([
     db.from("lead_activities").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false }),
     db.from("profiles").select("id, full_name").eq("company_id", ctx.companyId).eq("active", true).order("full_name"),
     // Fehlt die Tabelle (Migration 00018), bleibt die Liste einfach leer
@@ -50,6 +51,8 @@ export default async function LeadDetailPage({
       .eq("lead_id", lead.id)
       .eq("company_id", ctx.companyId)
       .order("beginn", { ascending: false }),
+    // Fehlt die Tabelle (Migration 00019), gibt es einfach keinen Knopf
+    ladeBuchungslink(db, ctx.companyId).catch(() => null),
   ]);
   const termine = (termineRes.error ? [] : termineRes.data ?? []) as TerminZeile[];
   const aktivitaeten = (aktRes.data as LeadActivity[]) ?? [];
@@ -80,6 +83,7 @@ export default async function LeadDetailPage({
       anrufFrage={sp.anruf === "1"}
       termine={termine}
       jetztIso={new Date().toISOString()}
+      buchungslink={buchungslink}
     />
   );
 }

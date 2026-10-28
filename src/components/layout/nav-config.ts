@@ -6,6 +6,7 @@ import {
   ClipboardList,
   FolderKanban,
   BookOpen,
+  CalendarDays,
   FileText,
   Timer,
   Megaphone,
@@ -103,6 +104,7 @@ export const KUNDEN_NAV: NavGroup[] = [
     label: "Einstellungen",
     items: [
       { label: "Projektstatus", href: "/status", icon: Kanban, roles: KUNDE },
+      { label: "Kalender", href: "/kalender", icon: CalendarDays, roles: KUNDE },
       { label: "Formulare", href: "/forms/after-close", icon: FileText, roles: ["client_owner"] },
     ],
   },
