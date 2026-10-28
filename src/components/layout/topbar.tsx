@@ -28,10 +28,12 @@ export function Topbar({
   role,
   userName,
   firmenName = null,
+  glocke = null,
 }: {
   role: UserRole;
   userName: string;
   firmenName?: string | null;
+  glocke?: React.ReactNode;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -65,6 +67,8 @@ export function Topbar({
         <span className="flex-1">Seiten durchsuchen</span>
         <kbd className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium">⌘ K</kbd>
       </button>
+      <div className="flex items-center gap-2">
+      {glocke}
       <DropdownMenu>
         <DropdownMenuTrigger className="flex items-center gap-3 rounded-full py-1 pl-1 pr-3 outline-none transition-colors hover:bg-muted">
           <span className="flex size-10 items-center justify-center rounded-full bg-accent text-sm font-medium text-primary">
@@ -90,6 +94,7 @@ export function Topbar({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
 
       <CommandDialog open={open} onOpenChange={setOpen} title="Navigation" description="Seite suchen">
         <CommandInput placeholder="Wohin möchtest du?" />

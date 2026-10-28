@@ -9,6 +9,7 @@ import { istUuid } from "@/lib/zugriff";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ZugangAnlegen } from "@/components/zugaenge/zugang-anlegen";
+import { LeadEingaenge } from "@/components/eingang/lead-eingaenge";
 import type { Company, Profile } from "@/lib/types/database";
 import { FirmaFormular } from "../firma-formular";
 import { kundenZugangAktiv, kundenZugangAnlegen } from "../actions";
@@ -116,6 +117,8 @@ export default async function KundeDetailPage({
           </p>
         </section>
       </div>
+
+      <LeadEingaenge companyId={firma.id} />
     </div>
   );
 }
