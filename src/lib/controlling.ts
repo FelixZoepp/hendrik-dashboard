@@ -80,6 +80,7 @@ export interface CProtokoll {
 
 /** Cold Call: „Nächster Schritt“ bei erreichtem Entscheider (Wert „Setting vereinbart am:“ = Termin gelegt) */
 const CC_ENTSCHEIDER_FELD = "custom.cf_rYzdqWeplRWv7FFbrhgaXOhKSUxhYgopFVpUmLHFruf";
+const CC_SETTING_GELEGT = "Setting vereinbart am:";
 
 /** Feld „Nächster Schritt“ je Protokolltyp und der Wert für No-Show (so in Close gepflegt) */
 const PROTOKOLL_ERGEBNIS = {
@@ -87,13 +88,27 @@ const PROTOKOLL_ERGEBNIS = {
   strategie: { typ: PROTOKOLL.closing, feld: "custom.cf_9vkQK8YANMMZ3lyt0aAZbAnkAxYoB15WwM5sTyr3veM", noShow: "No SHow" },
 } as const;
 
+/**
+ * Welche Close-Protokolle buildReport überhaupt auswertet — zum gezielten Laden
+ * (statt aller Cold-Call-Protokolle): Setting/Closing-Protokolle und Cold Calls mit „Setting vereinbart am:“.
+ * Jede Auswertung nutzt nur einen der beiden Teile, die Reihenfolge innerhalb eines Teils bleibt erhalten.
+ */
+export const PROTOKOLL_FILTER = {
+  ergebnisTypen: [PROTOKOLL_ERGEBNIS.erst.typ, PROTOKOLL_ERGEBNIS.strategie.typ] as string[],
+  coldCallTyp: PROTOKOLL.coldCall as string,
+  coldCallFeld: CC_ENTSCHEIDER_FELD,
+  coldCallWert: CC_SETTING_GELEGT,
+};
+
 export interface ControllingInput {
   period: Period;
   users: CUser[];
-  opps: COpp[]; // alle Opportunities
-  calls: CCall[]; // Calls ab prevStart (bzw. periodStart)
+  opps: COpp[]; // alle Opportunities (genutzt werden nur „won“ und „active“)
+  calls: CCall[]; // Calls ab prevStart (bzw. periodStart) — oder nur ab periodStart, wenn `callsPrevAnzahl` gesetzt ist
+  /** Anzahl Calls der Vorperiode (per DB-Count), damit die Vorperiode nicht Zeile für Zeile geladen werden muss */
+  callsPrevAnzahl?: number | null;
   events: CEvent[]; // Calendly ab prevStart bis +60 Tage
-  protokolle: CProtokoll[]; // Close-Protokolle ab prevStart
+  protokolle: CProtokoll[]; // Close-Protokolle ab prevStart (genutzt: Setting/Closing mit Ergebnis, Cold Call „Setting vereinbart“)
   meta: CMeta[]; // ab prevStart
   leadsNew: number;
   leadsNewPrev: number | null;
@@ -150,11 +165,40 @@ const berlin = new Intl.DateTimeFormat("de-DE", {
   hourCycle: "h23",
 });
 const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+// Berlin liegt immer volle Stunden neben UTC → Wochentag/Stunde/Datum hängen nur an der UTC-Stunde.
+// Zwischenspeicher je UTC-Stunde spart zehntausende Intl-Aufrufe pro Report (Ergebnis identisch).
+const HOUR_MS = 3600_000;
+const slotCache = new Map<number, { tag: number; stunde: number }>();
+const berlinTag = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" });
+const tagCache = new Map<number, string>();
+function stundenKey(iso: string): number {
+  return Math.floor(new Date(iso).getTime() / HOUR_MS);
+}
+function merke<V>(cache: Map<number, V>, key: number, wert: () => V): V {
+  let v = cache.get(key);
+  if (v === undefined) {
+    if (cache.size > 100_000) cache.clear();
+    v = wert();
+    cache.set(key, v);
+  }
+  return v;
+}
 function berlinSlot(iso: string): { tag: number; stunde: number } {
+  const key = stundenKey(iso);
+  if (Number.isNaN(key)) return berlinSlotDirekt(iso);
+  return merke(slotCache, key, () => berlinSlotDirekt(iso));
+}
+function berlinSlotDirekt(iso: string): { tag: number; stunde: number } {
   const parts = berlin.formatToParts(new Date(iso));
   const wd = (parts.find((p) => p.type === "weekday")?.value ?? "Mo").replace(".", "");
   const h = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
   return { tag: Math.max(0, WEEKDAYS.indexOf(wd)), stunde: h };
+}
+/** Kalendertag (Berlin, YYYY-MM-DD) eines Zeitpunkts. */
+function berlinTagVon(iso: string): string {
+  const key = stundenKey(iso);
+  if (Number.isNaN(key)) return berlinTag.format(new Date(iso));
+  return merke(tagCache, key, () => berlinTag.format(new Date(iso)));
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +403,11 @@ export function buildReport(input: ControllingInput): ControllingReport {
 
   // --- Periodenschnitte ---
   const calls = input.calls.filter((c) => inRange(c.date_created, periodStart, now));
-  const callsPrev = hasPrev ? input.calls.filter((c) => inRange(c.date_created, prevStart!, prevEnd)) : [];
+  const anrufePrev = !hasPrev
+    ? 0
+    : input.callsPrevAnzahl != null
+      ? input.callsPrevAnzahl
+      : input.calls.filter((c) => inRange(c.date_created, prevStart!, prevEnd)).length;
   const events = input.events.filter((e) => inRange(e.scheduled_at, periodStart, now));
   const eventsPrev = hasPrev ? input.events.filter((e) => inRange(e.scheduled_at, prevStart!, prevEnd)) : [];
   const kommendeEvents = input.events
@@ -471,7 +519,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
     cac: { value: ratio(adSpend, won.length), prev: pv(ratio(adSpendPrev, wonPrev.length)) },
     roas: { value: ratio(umsatz, adSpend), prev: pv(ratio(umsatzPrev, adSpendPrev)) },
     leads: { value: input.leadsNew, prev: input.leadsNewPrev },
-    anrufe: { value: calls.length, prev: pv(callsPrev.length) },
+    anrufe: { value: calls.length, prev: pv(anrufePrev) },
     leadsAngerufen: uniqueLeads(calls),
     leadsErreicht: uniqueLeads(calls.filter(isReached)),
     termine: terminKpis,
@@ -589,7 +637,7 @@ export function buildReport(input: ControllingInput): ControllingReport {
   const gelegt = new Map<string, { userId: string; datum: string }>();
   for (const p of input.protokolle) {
     if (p.custom_activity_type_id !== PROTOKOLL.coldCall || !p.user_id) continue;
-    if (p.fields?.[CC_ENTSCHEIDER_FELD] !== "Setting vereinbart am:" || !inRange(p.date_created, periodStart, now)) continue;
+    if (p.fields?.[CC_ENTSCHEIDER_FELD] !== CC_SETTING_GELEGT || !inRange(p.date_created, periodStart, now)) continue;
     const alt = gelegt.get(p.lead_id);
     if (!alt || alt.datum < p.date_created) gelegt.set(p.lead_id, { userId: p.user_id, datum: p.date_created });
   }
@@ -897,9 +945,7 @@ function buildErreichbarkeit(calls: CCall[], events: CEvent[], users: CUser[]): 
   const opener: OpenerErreichbarkeit[] = users
     .map((u) => {
       const uc = calls.filter((c) => c.user_id === u.close_id);
-      const tage = new Set(
-        uc.map((c) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin" }).format(new Date(c.date_created)))
-      ).size;
+      const tage = new Set(uc.map((c) => berlinTagVon(c.date_created))).size;
       const stunden = nachStunde(uc);
       const fest = stunden.filter((h) => h.anrufe >= OPENER_STUNDE_MIN).sort((a, b) => quote(b) - quote(a));
       return {
