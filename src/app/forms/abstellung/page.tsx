@@ -20,7 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { formularAbsenden } from "../actions";
 import { CheckCircle2 } from "lucide-react";
 
 export default function AbstellungFormPage() {
@@ -40,11 +40,7 @@ export default function AbstellungFormPage() {
     }
 
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("form_submissions").insert({
-      typ: "abstellung",
-      payload: data,
-    });
+    const { error } = await formularAbsenden("abstellung", data);
 
     if (error) {
       toast.error("Fehler beim Absenden");

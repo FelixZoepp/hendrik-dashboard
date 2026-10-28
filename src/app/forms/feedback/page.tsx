@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { formularAbsenden } from "../actions";
 import { CheckCircle2 } from "lucide-react";
 
 const NPS_SCALE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
@@ -31,11 +31,7 @@ export default function FeedbackFormPage() {
     }
 
     setLoading(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("form_submissions").insert({
-      typ: "feedback",
-      payload: { nps, kommentar },
-    });
+    const { error } = await formularAbsenden("feedback", { nps: String(nps), kommentar });
 
     if (error) {
       toast.error("Fehler beim Absenden");

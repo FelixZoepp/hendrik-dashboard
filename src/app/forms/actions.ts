@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { firmaAktivieren } from "@/lib/firma-aktivieren";
 
 /**
- * Formulare After-Close und Zugänge: speichern über den Server (Service-Client), Firma IMMER aus requireKunde().
+ * Formulare (After-Close, Zugänge, Feedback, Abstellung): speichern über den Server (Service-Client), Firma IMMER aus requireKunde().
  *
  * Vorher schrieb der Browser-Client direkt in form_submissions — ohne company_id. Dadurch lehnte RLS
  * das Speichern für Kunden ab (Policy verlangt company_id = eigene Firma), und beim „Als Kunde ansehen“
@@ -14,7 +14,8 @@ import { firmaAktivieren } from "@/lib/firma-aktivieren";
  * Absenden beim „Als Kunde ansehen“ ist eine bewusste Handlung des Teams (füllt für den Kunden aus).
  */
 
-export type FormularTyp = "after_close" | "zugaenge";
+export type FormularTyp = "after_close" | "zugaenge" | "feedback" | "abstellung";
+const TYPEN: readonly FormularTyp[] = ["after_close", "zugaenge", "feedback", "abstellung"];
 
 const MAX_FELDER = 60;
 const MAX_LAENGE = 5000;
@@ -32,7 +33,7 @@ function bereinigen(eingabe: unknown): Record<string, string> {
 
 export async function formularAbsenden(typ: FormularTyp, daten: Record<string, string>): Promise<{ error: string | null }> {
   const ctx = await requireKunde();
-  if (typ !== "after_close" && typ !== "zugaenge") return { error: "Unbekanntes Formular" };
+  if (!TYPEN.includes(typ)) return { error: "Unbekanntes Formular" };
   const payload = bereinigen(daten);
 
   try {
