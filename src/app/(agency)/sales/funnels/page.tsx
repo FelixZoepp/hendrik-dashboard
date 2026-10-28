@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
-import { Lock, Magnet, Unlock } from "lucide-react";
+import { Magnet } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { adminPinZustand, istFreigeschaltet } from "@/lib/whatsapp/admin";
+import { istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { terminBasisUrl } from "@/lib/whatsapp/client";
 import { ladeEinstellungen } from "@/lib/whatsapp/einstellungen";
 import { funnelWebhookToken, type Eintragung } from "@/lib/funnel/automatik";
 import { ladeFunnelEinstellungen } from "@/lib/funnel/einstellungen";
 import { SENDEFENSTER, WARTEZEIT_MIN } from "@/lib/funnel/logik";
-import { funnelLoeschenAktion, funnelSpeichernAktion, pinAktion, schalterAktion, sperrenAktion } from "./actions";
+import { funnelLoeschenAktion, funnelSpeichernAktion, schalterAktion } from "./actions";
 
 export const metadata: Metadata = { title: "Funnels" };
 export const dynamic = "force-dynamic";
@@ -178,28 +178,6 @@ export default async function FunnelsPage({ searchParams }: { searchParams: Prom
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Abschnitt titel="Freischaltung" beschreibung="Schalter, Einstellungen und Webhook-URLs sind mit der Admin-PIN geschützt.">
-          {adminPinZustand() !== "ok" ? (
-            <p className="text-sm text-destructive">WHATSAPP_ADMIN_PIN fehlt oder ist zu kurz — Änderungen sind gesperrt.</p>
-          ) : frei ? (
-            <form action={sperrenAktion} className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-2 text-sm text-success">
-                <Unlock className="size-4" /> Freigeschaltet
-              </span>
-              <Button type="submit" variant="outline" size="sm">
-                Sperren
-              </Button>
-            </form>
-          ) : (
-            <form action={pinAktion} className="flex items-center gap-2">
-              <Lock className="size-4 text-muted-foreground" />
-              <Input name="pin" type="password" autoComplete="off" placeholder="Admin-PIN" className="max-w-48" />
-              <Button type="submit" size="sm">
-                Freischalten
-              </Button>
-            </form>
-          )}
-        </Abschnitt>
 
         <Abschnitt titel="WhatsApp-Vorlagen" beschreibung="Einreichen und einschalten auf der Seite WhatsApp-Bot (gleiche Prüfungen wie die Terminbot-Vorlagen).">
           <ul className="space-y-2 text-sm">

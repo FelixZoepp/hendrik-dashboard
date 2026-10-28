@@ -24,7 +24,7 @@ function zurueck(meldung: string, fehler = false): never {
 }
 
 async function nurFreigeschaltet() {
-  if (!(await istFreigeschaltet())) zurueck("Bitte zuerst mit der Admin-PIN freischalten.", true);
+  if (!(await istFreigeschaltet())) zurueck("Nur für Admin und Sales.", true);
 }
 
 const fehlerText = (err: unknown) => (err instanceof Error ? err.message : String(err));

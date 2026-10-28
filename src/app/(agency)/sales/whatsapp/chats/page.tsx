@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Check, CheckCheck, CircleAlert, Clock, Lock, MessagesSquare } from "lucide-react";
+import { Check, CheckCheck, CircleAlert, Clock, MessagesSquare } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { formatDatum, formatUhrzeit } from "@/lib/whatsapp/logik";
 import { VORLAGEN } from "@/lib/whatsapp/vorlagen";
-import { pinAktion } from "../actions";
 import { AutoAktualisieren } from "./auto-aktualisieren";
 
 export const metadata: Metadata = { title: "WhatsApp-Chats" };
@@ -88,16 +85,9 @@ export default async function WhatsappChatsPage({
         <h1 className="fern-page-title">WhatsApp-Chats</h1>
         <section className="fern-card max-w-md p-6">
           <p className="mb-4 text-sm text-muted-foreground">
-            Die Chats enthalten Kundendaten und sind deshalb mit der Admin-PIN geschützt.
+            Die Chats enthalten Kundendaten und sind deshalb nur für Admin und Sales sichtbar.
           </p>
-          <form action={pinAktion} className="flex items-center gap-2">
-            <input type="hidden" name="ziel" value="chats" />
-            <Lock className="size-4 text-muted-foreground" />
-            <Input name="pin" type="password" autoComplete="off" placeholder="Admin-PIN" className="max-w-48" />
-            <Button type="submit" size="sm">
-              Freischalten
-            </Button>
-          </form>
+          <p className="text-sm">Nur für Admin und Sales.</p>
           {fehler && <p className="mt-3 text-sm text-destructive">{fehler}</p>}
         </section>
       </div>

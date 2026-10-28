@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { CheckCircle2, CircleAlert, Lock, MessageCircle, Unlock } from "lucide-react";
+import { CheckCircle2, CircleAlert, MessageCircle } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { adminPinZustand, istFreigeschaltet } from "@/lib/whatsapp/admin";
+import { istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { terminBasisUrl, waVerbindung, WA_ENV_PFLICHT, WA_ENV_WEITERE } from "@/lib/whatsapp/client";
 import { ladeEinstellungen } from "@/lib/whatsapp/einstellungen";
 import { bestaetigungsQuote, formatDatum, formatUhrzeit, type QuoteWert, type TerminArt } from "@/lib/whatsapp/logik";
@@ -18,14 +18,11 @@ import {
   einreichenAktion,
   einstellungenAktion,
   hauptschalterAktion,
-  pinAktion,
-  sperrenAktion,
   testnummernAktion,
   vorlageSchalterAktion,
   calendlyWebhookAktion,
   closeFeldAktion,
-  closeStatusFeldAktion,
-} from "./actions";
+  closeStatusFeldAktion } from "./actions";
 
 export const metadata: Metadata = { title: "WhatsApp-Bot" };
 export const dynamic = "force-dynamic";
@@ -253,33 +250,6 @@ export default async function WhatsappBotPage({
           <p className="mt-3 text-xs text-muted-foreground">Knopf-Links zeigen auf {terminBasisUrl()}</p>
         </Abschnitt>
 
-        <Abschnitt
-          titel="Freischaltung"
-          beschreibung="Schalter, Einreichen und Kontaktdaten sind mit der Admin-PIN geschützt."
-        >
-          {adminPinZustand() === "fehlt" ? (
-            <p className="text-sm text-destructive">WHATSAPP_ADMIN_PIN ist nicht gesetzt — Änderungen sind gesperrt.</p>
-          ) : adminPinZustand() === "zu_kurz" ? (
-            <p className="text-sm text-destructive">PIN zu kurz – bitte in Vercel ändern (mind. 10 Zeichen).</p>
-          ) : frei ? (
-            <form action={sperrenAktion} className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-2 text-sm text-success">
-                <Unlock className="size-4" /> Freigeschaltet
-              </span>
-              <Button type="submit" variant="outline" size="sm">
-                Sperren
-              </Button>
-            </form>
-          ) : (
-            <form action={pinAktion} className="flex items-center gap-2">
-              <Lock className="size-4 text-muted-foreground" />
-              <Input name="pin" type="password" autoComplete="off" placeholder="Admin-PIN" className="max-w-48" />
-              <Button type="submit" size="sm">
-                Freischalten
-              </Button>
-            </form>
-          )}
-        </Abschnitt>
 
         <Abschnitt
           titel="Hauptschalter"

@@ -1,14 +1,13 @@
 import type { Metadata } from "next";
-import { CheckCircle2, CircleAlert, Lock, Tag, Unlock } from "lucide-react";
+import { CheckCircle2, CircleAlert, Tag } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { adminPinZustand, istFreigeschaltet } from "@/lib/whatsapp/admin";
+import { istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { ladeVerlustgrundEinstellungen } from "@/lib/verlustgrund/automatik";
 import { aufgabenText, VERLUSTGRUENDE, VERLUSTGRUND_FELDNAME } from "@/lib/verlustgrund/logik";
-import { felderAnlegenAktion, pinAktion, schalterAktion, sperrenAktion } from "./actions";
+import { felderAnlegenAktion, schalterAktion } from "./actions";
 
 export const metadata: Metadata = { title: "Verlustgrund" };
 export const dynamic = "force-dynamic";
@@ -109,30 +108,6 @@ export default async function VerlustgrundPage({
       {fehler && <p className="rounded-2xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{fehler}</p>}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Abschnitt titel="Freischaltung" beschreibung="Schalter und Einrichtung sind mit der Admin-PIN geschützt (wie beim WhatsApp-Bot).">
-          {adminPinZustand() === "fehlt" ? (
-            <p className="text-sm text-destructive">WHATSAPP_ADMIN_PIN ist nicht gesetzt — Änderungen sind gesperrt.</p>
-          ) : adminPinZustand() === "zu_kurz" ? (
-            <p className="text-sm text-destructive">PIN zu kurz – bitte in Vercel ändern (mind. 10 Zeichen).</p>
-          ) : frei ? (
-            <form action={sperrenAktion} className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-2 text-sm text-success">
-                <Unlock className="size-4" /> Freigeschaltet
-              </span>
-              <Button type="submit" variant="outline" size="sm">
-                Sperren
-              </Button>
-            </form>
-          ) : (
-            <form action={pinAktion} className="flex items-center gap-2">
-              <Lock className="size-4 text-muted-foreground" />
-              <Input name="pin" type="password" autoComplete="off" placeholder="Admin-PIN" className="max-w-48" />
-              <Button type="submit" size="sm">
-                Freischalten
-              </Button>
-            </form>
-          )}
-        </Abschnitt>
 
         <Abschnitt
           titel="Felder in Close"

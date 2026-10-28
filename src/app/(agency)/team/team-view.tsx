@@ -5,6 +5,15 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import type { UserRole } from "@/lib/types/database";
+import { Button } from "@/components/ui/button";
+import { ZugangAnlegen } from "@/components/zugaenge/zugang-anlegen";
+import { teamZugangAktiv, teamZugangAnlegen } from "./actions";
+
+const TEAM_ROLLEN_AUSWAHL = [
+  { value: "sales", label: "Sales" },
+  { value: "fulfillment", label: "Fulfillment" },
+  { value: "admin", label: "Admin" },
+];
 
 type RoleFilter = "alle" | "admin" | "sales" | "fulfillment" | "kunden";
 
@@ -40,6 +49,7 @@ interface ProfileWithCompany {
   role: string;
   company_id: string | null;
   avatar_url: string | null;
+  email?: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -56,6 +66,8 @@ interface CloseUser {
 interface TeamViewProps {
   profiles: ProfileWithCompany[];
   closeUsers: CloseUser[];
+  eigeneId: string;
+  fehler: string | null;
 }
 
 function getInitials(name: string): string {
@@ -70,7 +82,7 @@ function matchesFilter(role: string, filter: RoleFilter): boolean {
   return role === filter;
 }
 
-export function TeamView({ profiles, closeUsers }: TeamViewProps) {
+export function TeamView({ profiles, closeUsers, eigeneId, fehler }: TeamViewProps) {
   const [activeTab, setActiveTab] = useState<RoleFilter>("alle");
 
   const filtered = useMemo(() => {
@@ -92,6 +104,7 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="fern-page-title">Team</h1>
         <p className="text-sm text-muted-foreground">
@@ -102,6 +115,16 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
           )}
         </p>
       </div>
+        <ZugangAnlegen
+          aktion={teamZugangAnlegen}
+          rollen={TEAM_ROLLEN_AUSWAHL}
+          titel="Team-Mitglied einladen"
+          knopf="Team-Mitglied einladen"
+        />
+      </div>
+      {fehler && (
+        <p className="rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">{fehler}</p>
+      )}
 
       {/* Filter tabs */}
       <div className="flex gap-1 overflow-x-auto">
@@ -145,7 +168,7 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
             return (
               <div
                 key={member.id}
-                className="flex items-center gap-3 fern-card p-6"
+                className={cn("flex items-center gap-3 fern-card p-6", !member.active && "opacity-60")}
               >
                 <Avatar>
                   <AvatarFallback>
@@ -182,7 +205,19 @@ export function TeamView({ profiles, closeUsers }: TeamViewProps) {
                       </span>
                     )}
                   </div>
+                  {member.email && (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{member.email}</p>
+                  )}
                 </div>
+                {member.id !== eigeneId && (
+                  <form action={teamZugangAktiv}>
+                    <input type="hidden" name="user_id" value={member.id} />
+                    <input type="hidden" name="aktiv" value={member.active ? "0" : "1"} />
+                    <Button type="submit" size="xs" variant={member.active ? "ghost" : "secondary"}>
+                      {member.active ? "Sperren" : "Entsperren"}
+                    </Button>
+                  </form>
+                )}
               </div>
             );
           })}

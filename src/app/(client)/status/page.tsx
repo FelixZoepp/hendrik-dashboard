@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireKunde } from "@/lib/kontext";
 import { Badge } from "@/components/ui/badge";
 import { Globe, Megaphone, Activity, Package, ExternalLink } from "lucide-react";
 
@@ -43,19 +44,8 @@ interface ProjectRow {
 }
 
 export default async function KundenStatusPage() {
+  const { companyId } = await requireKunde();
   const supabase = createAdminClient();
-
-  const companyId = null;
-  if (!companyId) {
-    return (
-      <div className="space-y-6">
-        <h1 className="fern-page-title">Projektstatus</h1>
-        <p className="text-sm text-muted-foreground">
-          Dein Konto ist noch keinem Unternehmen zugeordnet.
-        </p>
-      </div>
-    );
-  }
 
   const { data } = await supabase
     .from("projects")

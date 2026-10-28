@@ -1,9 +1,15 @@
 import { AppShell } from "@/components/layout/app-shell";
+import { requireTeam } from "@/lib/kontext";
 
-export default function AgencyLayout({
+export default async function AgencyLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <AppShell role="admin">{children}</AppShell>;
+  const ctx = await requireTeam();
+  return (
+    <AppShell role={ctx.rolle} userName={ctx.profile.full_name || ctx.email || "Team"}>
+      {children}
+    </AppShell>
+  );
 }

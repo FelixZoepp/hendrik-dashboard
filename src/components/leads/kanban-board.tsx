@@ -4,182 +4,140 @@ import { useState } from "react";
 import {
   DndContext,
   DragOverlay,
+  KeyboardSensor,
   PointerSensor,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
   useSensor,
   useSensors,
-  type DragStartEvent,
   type DragEndEvent,
-  type DragOverEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
-import { useDroppable } from "@dnd-kit/core";
-import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 import { LeadCard } from "./lead-card";
-import { KANBAN_COLUMNS, LEAD_STATUS_CONFIG } from "@/lib/lead-utils";
-import { updateLeadStatus } from "@/app/(client)/leads/actions";
-import { toast } from "sonner";
-import type { Lead, LeadStatus } from "@/lib/types/database";
+import { STUFEN, istStufe, statusFuerStufe, stufeVon, type Stufe } from "@/lib/crm/logik";
+import { formatCurrency } from "@/lib/lead-utils";
+import { useStufenWechsel } from "@/components/crm/stufen-wechsel";
+import type { Lead } from "@/lib/types/database";
 
 interface KanbanBoardProps {
   leads: Lead[];
+  namen?: Record<string, string>;
 }
 
-function DroppableColumn({
-  status,
-  children,
-}: {
-  status: string;
-  children: React.ReactNode;
-}) {
-  const { isOver, setNodeRef } = useDroppable({ id: status });
-  const config = LEAD_STATUS_CONFIG[status as LeadStatus];
-
+function Spalte({ stufe, anzahl, summe, children }: { stufe: (typeof STUFEN)[number]; anzahl: number; summe: number; children: React.ReactNode }) {
+  const { isOver, setNodeRef } = useDroppable({ id: stufe.id });
   return (
     <div
       ref={setNodeRef}
-      className={`flex w-64 shrink-0 flex-col rounded-lg lg:w-72 transition-colors ${
-        isOver ? "bg-primary/10 ring-1 ring-primary/30" : "bg-muted/50"
-      }`}
+      className={cn(
+        "flex w-72 shrink-0 flex-col rounded-2xl transition-colors",
+        isOver ? "bg-primary/10 ring-2 ring-primary/40" : "bg-muted/60",
+      )}
     >
-      <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-        <span className="text-xs font-medium text-foreground">
-          {config.label}
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        <span className="text-sm font-semibold">{stufe.label}</span>
+        <span className="flex items-center gap-2 text-xs text-muted-foreground">
+          {summe > 0 && <span className="font-semibold text-foreground">{formatCurrency(summe)}</span>}
+          <span className="rounded-full bg-card px-2 py-0.5 font-semibold">{anzahl}</span>
         </span>
       </div>
-      <ScrollArea className="flex-1 p-2">
-        <div className="space-y-2 min-h-16">{children}</div>
-      </ScrollArea>
+      <div className="flex-1 space-y-2 px-2 pb-2 min-h-24">{children}</div>
     </div>
   );
 }
 
-function DraggableLeadCard({
-  lead,
-  href,
-}: {
-  lead: Lead;
-  href: string;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({ id: lead.id });
-
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.3 : 1,
-  };
-
+function ZiehKarte({ lead, zustaendig }: { lead: Lead; zustaendig?: string | null }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: lead.id });
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
-      <LeadCard lead={lead} href={href} />
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), opacity: isDragging ? 0.3 : 1 }}
+      {...listeners}
+      {...attributes}
+      className="touch-manipulation"
+    >
+      <LeadCard lead={lead} href={`/leads/${lead.id}`} zustaendig={zustaendig} />
     </div>
   );
 }
 
-export function KanbanBoard({ leads: initialLeads }: KanbanBoardProps) {
-  const [leads, setLeads] = useState(initialLeads);
-  const [activeId, setActiveId] = useState<string | null>(null);
+/** Pipeline-Board (Desktop): Karten per Drag & Drop in eine andere Stufe ziehen. */
+export function KanbanBoard({ leads: serverLeads, namen }: KanbanBoardProps) {
+  // Optimistische Verschiebungen bis die Seite neu geladen ist
+  const [verschoben, setVerschoben] = useState<Record<string, Stufe>>({});
+  const [aktivId, setAktivId] = useState<string | null>(null);
+  const { starte, dialog } = useStufenWechsel();
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
+    useSensor(KeyboardSensor),
   );
 
-  const activeLead = activeId
-    ? leads.find((l) => l.id === activeId) ?? null
-    : null;
+  const leads = serverLeads.map((l) =>
+    verschoben[l.id] && stufeVon(l.status) !== verschoben[l.id] ? { ...l, status: statusFuerStufe(verschoben[l.id]) } : l,
+  );
+  const aktiv = aktivId ? leads.find((l) => l.id === aktivId) ?? null : null;
 
-  function handleDragStart(event: DragStartEvent) {
-    setActiveId(event.active.id as string);
+  function onDragStart(e: DragStartEvent) {
+    setAktivId(String(e.active.id));
   }
 
-  function handleDragOver(event: DragOverEvent) {
-    const { active, over } = event;
-    if (!over) return;
+  function onDragEnd(e: DragEndEvent) {
+    setAktivId(null);
+    const ziel = e.over?.id;
+    if (!istStufe(ziel)) return;
+    const lead = serverLeads.find((l) => l.id === e.active.id);
+    if (!lead || stufeVon(lead.status) === ziel) return;
 
-    const leadId = active.id as string;
-    const newStatus = over.id as LeadStatus;
-
-    // Nur wenn über eine Spalte gedroppt wird
-    if (!KANBAN_COLUMNS.includes(newStatus)) return;
-
-    const lead = leads.find((l) => l.id === leadId);
-    if (!lead || lead.status === newStatus) return;
-
-    // Optimistisches Update
-    setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus } : l))
-    );
-  }
-
-  async function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event;
-    setActiveId(null);
-
-    if (!over) return;
-
-    const leadId = active.id as string;
-    const newStatus = over.id as LeadStatus;
-
-    if (!KANBAN_COLUMNS.includes(newStatus)) return;
-
-    const originalLead = initialLeads.find((l) => l.id === leadId);
-    if (!originalLead || originalLead.status === newStatus) return;
-
-    // Gewonnen/Verloren braucht Pflichtfelder — redirect zur Detail-Seite
-    if (newStatus === "gewonnen" || newStatus === "verloren") {
-      setLeads(initialLeads); // Revert
-      toast.info(
-        `Öffne den Lead, um ihn als "${LEAD_STATUS_CONFIG[newStatus].label}" zu markieren.`
-      );
-      return;
-    }
-
-    // Server-seitig updaten
-    const result = await updateLeadStatus(leadId, { status: newStatus });
-    if (result?.error) {
-      setLeads(initialLeads); // Revert bei Fehler
-      toast.error("Status konnte nicht geändert werden");
-    }
+    setVerschoben((v) => ({ ...v, [lead.id]: ziel }));
+    void starte(lead, ziel, (ok) => {
+      // Erfolg: bleibt verschoben, bis die Server-Daten (refresh) da sind; Abbruch/Fehler: zurück
+      if (ok) return;
+      setVerschoben((v) => {
+        const rest = { ...v };
+        delete rest[lead.id];
+        return rest;
+      });
+    });
   }
 
   return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="flex gap-3 overflow-x-auto pb-4">
-        {KANBAN_COLUMNS.map((status) => {
-          const columnLeads = leads.filter((l) => l.status === status);
-
+    <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      <div className="-mx-1 flex gap-3 overflow-x-auto px-1 pb-4">
+        {STUFEN.map((stufe) => {
+          const spalte = leads.filter((l) => stufeVon(l.status) === stufe.id);
+          const summe =
+            stufe.id === "auftrag"
+              ? spalte.reduce((s, l) => s + Number(l.auftragswert ?? 0), 0)
+              : stufe.id === "angebot"
+                ? spalte.reduce((s, l) => s + Number(l.angebotswert ?? 0), 0)
+                : 0;
           return (
-            <DroppableColumn key={status} status={status}>
-              {columnLeads.length === 0 ? (
-                <p className="px-2 py-8 text-center text-xs text-muted-foreground">
-                  Keine Leads
-                </p>
+            <Spalte key={stufe.id} stufe={stufe} anzahl={spalte.length} summe={summe}>
+              {spalte.length === 0 ? (
+                <p className="px-2 py-8 text-center text-xs text-muted-foreground">Hierher ziehen</p>
               ) : (
-                columnLeads.map((lead) => (
-                  <DraggableLeadCard
-                    key={lead.id}
-                    lead={lead}
-                    href={`/leads/${lead.id}`}
-                  />
+                spalte.map((lead) => (
+                  <ZiehKarte key={lead.id} lead={lead} zustaendig={lead.assigned_to ? namen?.[lead.assigned_to] : null} />
                 ))
               )}
-            </DroppableColumn>
+            </Spalte>
           );
         })}
       </div>
 
       <DragOverlay>
-        {activeLead && (
-          <div className="w-64 lg:w-72 opacity-90 rotate-2 shadow-lg">
-            <LeadCard lead={activeLead} href="#" />
+        {aktiv && (
+          <div className="w-72 rotate-2 opacity-95 shadow-xl">
+            <LeadCard lead={aktiv} href="#" ohneKnopf />
           </div>
         )}
       </DragOverlay>
+      {dialog}
     </DndContext>
   );
 }

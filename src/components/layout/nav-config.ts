@@ -1,6 +1,7 @@
 import type { UserRole } from "@/lib/types/database";
 import {
   BarChart3,
+  ChartNoAxesCombined,
   Magnet,
   ClipboardList,
   FolderKanban,
@@ -33,7 +34,11 @@ export interface NavGroup {
   items: NavItem[];
 }
 
-export const NAV_GROUPS: NavGroup[] = [
+const TEAM: UserRole[] = ["admin", "sales", "fulfillment"];
+const KUNDE: UserRole[] = ["client_owner", "client_member"];
+
+/** Navigation im internen Bereich (src/app/(agency)). */
+export const TEAM_NAV: NavGroup[] = [
   {
     label: "Menü",
     items: [
@@ -45,27 +50,56 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Funnels", href: "/sales/funnels", icon: Magnet, roles: ["admin", "sales"] },
       { label: "Marketing", href: "/marketing", icon: Megaphone, roles: ["admin"] },
       { label: "Fulfillment", href: "/fulfillment", icon: FolderKanban, roles: ["admin", "fulfillment"] },
-      { label: "Kunden", href: "/kunden", icon: Building2, roles: ["admin"] },
+      { label: "Kunden", href: "/kunden", icon: Building2, roles: TEAM },
+      { label: "Kunden-Auswertung", href: "/kunden/auswertung", icon: ChartNoAxesCombined, roles: TEAM },
       { label: "Team", href: "/team", icon: Users, roles: ["admin"] },
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["client_owner", "client_member"] },
-      { label: "Leads", href: "/leads", icon: ClipboardList, roles: ["client_owner", "client_member"] },
-      { label: "Projektstatus", href: "/status", icon: Kanban, roles: ["client_owner", "client_member"] },
     ],
   },
   {
     label: "Allgemein",
     items: [
-      { label: "SOPs", href: "/sops", icon: BookOpen, roles: ["admin", "sales", "fulfillment"] },
+      { label: "SOPs", href: "/sops", icon: BookOpen, roles: TEAM },
+      { label: "Masterclass-Editor", href: "/inhalte/masterclass", icon: GraduationCap, roles: TEAM },
       { label: "Reaktionszeiten", href: "/sla", icon: Timer, roles: ["admin"] },
-      { label: "Akademie", href: "/akademie", icon: GraduationCap, roles: ["client_owner", "client_member"] },
-      { label: "Downloads", href: "/downloads", icon: Download, roles: ["client_owner", "client_member"] },
+    ],
+  },
+];
+
+/**
+ * Navigation im Kundenportal (src/app/(client)). Neue Kundenseite = eine Zeile in der
+ * passenden Gruppe ergänzen (und den Pfad in KUNDEN_PRAEFIXE in src/lib/zugriff.ts).
+ */
+export const KUNDEN_NAV: NavGroup[] = [
+  {
+    label: "Aufträge",
+    items: [
+      { label: "Start", href: "/dashboard", icon: LayoutDashboard, roles: KUNDE },
+      { label: "Anfragen", href: "/leads", icon: ClipboardList, roles: KUNDE },
+      { label: "Auswertung", href: "/auswertung", icon: ChartNoAxesCombined, roles: KUNDE },
+    ],
+  },
+  {
+    label: "Wachstum",
+    items: [
+      { label: "Kampagne", href: "/kampagne", icon: Megaphone, roles: KUNDE },
+      { label: "Masterclass", href: "/akademie", icon: GraduationCap, roles: KUNDE },
+      { label: "Downloads", href: "/downloads", icon: Download, roles: KUNDE },
+    ],
+  },
+  {
+    label: "Einstellungen",
+    items: [
+      { label: "Projektstatus", href: "/status", icon: Kanban, roles: KUNDE },
       { label: "Formulare", href: "/forms/after-close", icon: FileText, roles: ["client_owner"] },
     ],
   },
 ];
 
+export const NAV_GROUPS: NavGroup[] = [...TEAM_NAV, ...KUNDEN_NAV];
+
 export function navGroupsFor(role: UserRole): NavGroup[] {
-  return NAV_GROUPS.map((g) => ({
+  const quelle = KUNDE.includes(role) ? KUNDEN_NAV : TEAM_NAV;
+  return quelle.map((g) => ({
     ...g,
     items: g.items.filter((i) => i.roles.includes(role)),
   })).filter((g) => g.items.length > 0);

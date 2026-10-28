@@ -21,6 +21,8 @@ import {
   Mail,
   MessageCircle,
   Send,
+  PhoneMissed,
+  CalendarClock,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { LeadActivity, LeadActivityTyp } from "@/lib/types/database";
@@ -31,6 +33,8 @@ const ACTIVITY_ICONS: Record<LeadActivityTyp, typeof Phone> = {
   status_wechsel: ArrowRightLeft,
   email: Mail,
   whatsapp: MessageCircle,
+  nicht_erreicht: PhoneMissed,
+  rueckruf: CalendarClock,
 };
 
 const ACTIVITY_LABELS: Record<LeadActivityTyp, string> = {
@@ -39,6 +43,8 @@ const ACTIVITY_LABELS: Record<LeadActivityTyp, string> = {
   status_wechsel: "Status geändert",
   email: "E-Mail",
   whatsapp: "WhatsApp",
+  nicht_erreicht: "Nicht erreicht",
+  rueckruf: "Rückruf",
 };
 
 const MANUAL_TYPES: { value: LeadActivityTyp; label: string }[] = [

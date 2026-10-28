@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireKunde } from "@/lib/kontext";
 
 import { Download, FileText, FolderOpen } from "lucide-react";
 
@@ -14,12 +15,14 @@ interface DownloadItem {
 }
 
 export default async function DownloadsPage() {
-
+  const ctx = await requireKunde();
+  const rolle = ctx.istTeam ? "client_owner" : ctx.rolle;
   const supabase = createAdminClient();
 
   const { data: downloads } = await supabase
     .from("downloads")
     .select("id, titel, datei, kategorie")
+    .contains("sichtbar_fuer", [rolle])
     .order("kategorie")
     .order("titel");
 

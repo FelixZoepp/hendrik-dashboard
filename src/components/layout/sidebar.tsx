@@ -7,6 +7,7 @@ import type { UserRole } from "@/lib/types/database";
 import { RefreshCw } from "lucide-react";
 import { Brand } from "./brand";
 import { navGroupsFor, isActivePath } from "./nav-config";
+import { istTeamRolle } from "@/lib/zugriff";
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname();
@@ -53,6 +54,7 @@ export function Sidebar({ role }: { role: UserRole }) {
           </div>
         ))}
       </nav>
+      {istTeamRolle(role) && (
       <div className="fern-hero mt-6 p-5">
         <span className="flex size-8 items-center justify-center rounded-full bg-white text-primary">
           <RefreshCw className="size-4" />
@@ -62,6 +64,7 @@ export function Sidebar({ role }: { role: UserRole }) {
           Close, Calendly &amp; Meta Ads — täglich synchronisiert
         </p>
       </div>
+      )}
     </aside>
   );
 }

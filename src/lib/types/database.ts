@@ -26,21 +26,26 @@ export type LeadStatus =
   | "kein_interesse"
   | "nicht_erreicht";
 
-export type LeadQuelle = "google_ads" | "onepage" | "manuell" | "empfehlung";
+export type LeadQuelle = "google_ads" | "onepage" | "manuell" | "empfehlung" | "perspective" | "meta" | "webhook";
 
 export type LeadActivityTyp =
   | "anruf"
   | "notiz"
   | "status_wechsel"
   | "email"
-  | "whatsapp";
+  | "whatsapp"
+  // Migration 00015
+  | "nicht_erreicht"
+  | "rueckruf";
 
 export type VerlustGrund =
   | "zu_teuer"
   | "kein_bedarf_mehr"
   | "anderer_anbieter"
   | "nicht_erreicht"
-  | "unpassende_anfrage";
+  | "unpassende_anfrage"
+  // Migration 00015
+  | "sonstiges";
 
 export type SlaAmpel = "gruen" | "gelb" | "rot";
 
@@ -51,6 +56,8 @@ export interface Profile {
   company_id: string | null;
   avatar_url: string | null;
   active: boolean;
+  /** Login-E-Mail (Kopie aus auth.users, Migration 00013) */
+  email: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,6 +70,10 @@ export interface Company {
   email: string | null;
   telefon: string | null;
   adresse: string | null;
+  /** Migration 00013 */
+  ort: string | null;
+  /** Migration 00013 */
+  region: string | null;
   status: CompanyStatus;
   start_datum: string | null;
   ende_datum: string | null;
@@ -95,6 +106,21 @@ export interface Lead {
   verlust_grund: VerlustGrund | null;
   naechste_aktion_am: string | null;
   updated_at: string;
+  // CRM (Migration 00015)
+  kontakt_versuche: number;
+  verlust_notiz: string | null;
+  /** Nur Transport für den Status-Trigger (wird sofort geleert) */
+  geaendert_von: string | null;
+  // Lead-Eingang je Kunde (Migration 00014)
+  quelle_id: string | null;
+  external_id: string | null;
+  antworten: Array<{ frage: string; antwort: string }>;
+  utm: Record<string, string>;
+  anzeigengruppe: string | null;
+  formular: string | null;
+  kampagne_id: string | null;
+  /** Testlead (00014) – zählt in keiner Kennzahl */
+  ist_test: boolean;
 }
 
 export interface LeadActivity {
@@ -106,6 +132,35 @@ export interface LeadActivity {
   alt_status: LeadStatus | null;
   neu_status: LeadStatus | null;
   created_at: string;
+}
+
+// Sales-Auswertung (Migration 00018)
+export interface LeadAnruf {
+  id: string;
+  lead_id: string;
+  company_id: string;
+  user_id: string | null;
+  am: string;
+  kanal: "anruf" | "whatsapp";
+  ergebnis: "erreicht" | "nicht_erreicht" | "mailbox" | "falsche_nummer" | "rueckruf_gewuenscht" | null;
+  dauer_s: number | null;
+  notiz: string | null;
+  created_at: string;
+}
+
+export interface LeadTermin {
+  id: string;
+  lead_id: string;
+  company_id: string;
+  art: "vor_ort" | "telefon" | "video";
+  beginn: string;
+  status: "geplant" | "stattgefunden" | "nicht_erschienen" | "abgesagt" | "verschoben";
+  ersetzt_termin_id: string | null;
+  notiz: string | null;
+  ergebnis_am: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
 }
 
 export interface LeadSla {
