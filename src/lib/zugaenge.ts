@@ -18,7 +18,8 @@ export const LEERES_ERGEBNIS: ZugangErgebnis = { fehler: null, link: null, email
 
 const fehler = (text: string): ZugangErgebnis => ({ ...LEERES_ERGEBNIS, fehler: text });
 
-async function basisUrl(): Promise<string> {
+/** Basis-URL der Cloud: NEXT_PUBLIC_SITE_URL, sonst aus den Request-Headern. */
+export async function basisUrl(): Promise<string> {
   const fest = process.env.NEXT_PUBLIC_SITE_URL;
   if (fest) return fest.replace(/\/$/, "");
   const h = await headers();

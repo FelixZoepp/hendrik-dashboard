@@ -59,6 +59,7 @@ export const KUNDEN_PRAEFIXE: readonly string[] = [
   "/downloads",
   "/kampagne",
   "/auswertung",
+  "/kalender",
 ];
 
 /** Team-Seiten, die nur bestimmte Team-Rollen sehen dürfen. */
@@ -78,6 +79,7 @@ const OEFFENTLICHE_PRAEFIXE = [
   "/api/cron/",
   "/api/auth/",
   "/api/automation/", // eigenes CRON_SECRET
+  "/api/kalender/", // Kalender-Abo (ICS), geheimer Token je Firma
   "/b/",
   "/j/",
   "/n/",

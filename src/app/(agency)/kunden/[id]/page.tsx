@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { ZugangAnlegen } from "@/components/zugaenge/zugang-anlegen";
 import { LeadEingaenge } from "@/components/eingang/lead-eingaenge";
 import { KampagnenAbschnitt } from "@/components/kampagne/kampagnen-abschnitt";
+import { OnboardingTeamAbschnitt } from "@/components/onboarding/onboarding-karte";
+import { ladeOnboarding } from "@/lib/onboarding/daten";
 import type { Company, Profile } from "@/lib/types/database";
 import { FirmaFormular } from "../firma-formular";
 import { kundenZugangAktiv, kundenZugangAnlegen } from "../actions";
@@ -38,9 +40,10 @@ export default async function KundeDetailPage({
   if (!istUuid(id)) notFound();
 
   const db = createAdminClient();
-  const [firmaRes, zugaengeRes] = await Promise.all([
+  const [firmaRes, zugaengeRes, onboarding] = await Promise.all([
     db.from("companies").select("*").eq("id", id).maybeSingle(),
     db.from("profiles").select("*").eq("company_id", id).order("full_name"),
+    ladeOnboarding(db, id).catch(() => null),
   ]);
   if (!firmaRes.data) notFound();
   const firma = firmaRes.data as Company;
@@ -118,6 +121,8 @@ export default async function KundeDetailPage({
           </p>
         </section>
       </div>
+
+      {onboarding && <OnboardingTeamAbschnitt stand={onboarding} />}
 
       <LeadEingaenge companyId={firma.id} />
       <KampagnenAbschnitt companyId={firma.id} />
