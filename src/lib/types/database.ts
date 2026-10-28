@@ -26,7 +26,7 @@ export type LeadStatus =
   | "kein_interesse"
   | "nicht_erreicht";
 
-export type LeadQuelle = "google_ads" | "onepage" | "manuell" | "empfehlung";
+export type LeadQuelle = "google_ads" | "onepage" | "manuell" | "empfehlung" | "perspective" | "meta" | "webhook";
 
 export type LeadActivityTyp =
   | "anruf"
@@ -101,6 +101,14 @@ export interface Lead {
   verlust_grund: VerlustGrund | null;
   naechste_aktion_am: string | null;
   updated_at: string;
+  // Lead-Eingang je Kunde (Migration 00014)
+  quelle_id: string | null;
+  external_id: string | null;
+  antworten: Array<{ frage: string; antwort: string }>;
+  utm: Record<string, string>;
+  anzeigengruppe: string | null;
+  formular: string | null;
+  kampagne_id: string | null;
 }
 
 export interface LeadActivity {
