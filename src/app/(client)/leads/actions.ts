@@ -16,6 +16,14 @@ import {
   zeitpunktText,
   type Stufe,
 } from "@/lib/crm/logik";
+import {
+  ANRUF_ERGEBNIS_WERTE,
+  TERMIN_ART_WERTE,
+  istErreicht,
+  type AnrufErgebnis,
+  type TerminArt,
+} from "@/lib/auswertung/logik";
+import { ergebnisEintragen, terminEinfuegen, versuchStarten } from "@/lib/auswertung/erfassung";
 import type {
   Lead,
   LeadActivity,
@@ -48,6 +56,7 @@ function fehlerText(err: unknown) {
 function neuLaden(leadId?: string) {
   revalidatePath("/leads", "page");
   revalidatePath("/dashboard", "page");
+  revalidatePath("/auswertung", "page");
   if (leadId) revalidatePath(`/leads/${leadId}`, "page");
 }
 
@@ -168,6 +177,8 @@ const stufeSchema = z.object({
   auftragswert: z.number().positive("Auftragswert muss größer als 0 sein").nullable().optional(),
   verlust_grund: z.enum(VERLUST_WERTE).nullable().optional(),
   verlust_notiz: z.string().max(500).nullable().optional(),
+  termin_beginn: z.string().datetime({ offset: true }).nullable().optional(),
+  termin_art: z.enum(TERMIN_ART_WERTE).optional(),
 });
 
 export async function stufeSetzen(
@@ -178,11 +189,27 @@ export async function stufeSetzen(
     auftragswert?: number | null;
     verlust_grund?: VerlustGrund | null;
     verlust_notiz?: string | null;
+    /** Nur bei „Termin vor Ort“: Beginn (ISO) und Art des Termins */
+    termin_beginn?: string | null;
+    termin_art?: TerminArt;
   }
 ): Promise<Ergebnis<Lead>> {
   const { companyId, profile } = await requireKunde();
   try {
     const v = stufeSchema.parse({ id, ...eingabe });
+    if (v.stufe === "termin" && v.termin_beginn) {
+      // Termin zuerst anlegen: schlägt das fehl, bleibt auch die Stufe unverändert
+      const db0 = createAdminClient();
+      if (!(await gehoertZurFirma(db0, v.id, companyId))) return { data: null, error: "Lead nicht gefunden" };
+      const t = await terminEinfuegen(db0, {
+        leadId: v.id,
+        companyId,
+        userId: profile.id,
+        beginn: v.termin_beginn,
+        art: v.termin_art ?? "vor_ort",
+      });
+      if (t.error) return { data: null, error: t.error };
+    }
     const pruefung = pruefeStufenWechsel(v);
     if (pruefung) return { data: null, error: pruefung };
 
@@ -213,7 +240,10 @@ export async function stufeSetzen(
       payload.verlust_notiz = null;
     }
     if (stufenInfo(v.stufe).abschluss) payload.naechste_aktion_am = null;
-    if (Object.keys(payload).length === 0) return { data: null, error: null };
+    if (Object.keys(payload).length === 0) {
+      neuLaden(v.id);
+      return { data: null, error: null };
+    }
 
     const { data: lead, error } = await db
       .from("leads")
@@ -298,9 +328,76 @@ export async function kontaktProtokollieren(
     if (!(await gehoertZurFirma(db, leadId, companyId))) return { data: null, error: "Lead nicht gefunden" };
 
     await erstkontaktSetzen(db, leadId, companyId);
-    await aktivitaet(db, leadId, profile.id, k, k === "anruf" ? "Angerufen" : "WhatsApp geöffnet");
+    await versuchStarten(db, { leadId, companyId, userId: profile.id, kanal: k });
+    // Texte bewusst anders als vor 00018 („Angerufen“), damit die Altdaten-Übernahme nichts doppelt zählt
+    await aktivitaet(db, leadId, profile.id, k, k === "anruf" ? "Anruf gestartet" : "WhatsApp gestartet");
     neuLaden(leadId);
     return { data: true, error: null };
+  } catch (err) {
+    return { data: null, error: fehlerText(err) };
+  }
+}
+
+const ERGEBNIS_TEXT: Record<AnrufErgebnis, (versuch: number) => string> = {
+  erreicht: () => "Anruf: erreicht",
+  rueckruf_gewuenscht: () => "Anruf: erreicht – Rückruf gewünscht",
+  nicht_erreicht: (n) => `Anruf: nicht erreicht (${n}. Versuch)`,
+  mailbox: (n) => `Anruf: Mailbox (${n}. Versuch)`,
+  falsche_nummer: () => "Anruf: falsche Nummer",
+};
+
+/**
+ * Ergebnis eines Anrufs (1 Tipp): Kontaktversuch mit Ergebnis speichern (lead_anrufe),
+ * Erreicht/Rückruf gewünscht → Neu wird Kontaktiert und der fällige Rückruf ist erledigt,
+ * sonst +1 Versuch. Optional gleich einen Rückruf setzen (null = keinen).
+ */
+export async function anrufErgebnis(
+  id: string,
+  ergebnis: AnrufErgebnis,
+  rueckrufIso?: string | null
+): Promise<Ergebnis<{ versuche: number; erreicht: boolean }>> {
+  const { companyId, profile } = await requireKunde();
+  try {
+    const leadId = uuid.parse(id);
+    const erg = z.enum(ANRUF_ERGEBNIS_WERTE).parse(ergebnis);
+    const rueckruf = z.string().datetime({ offset: true }).nullable().optional().parse(rueckrufIso);
+    const db = createAdminClient();
+    const { data } = await db
+      .from("leads")
+      .select("status, naechste_aktion_am, kontakt_versuche")
+      .eq("id", leadId)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (!data) return { data: null, error: "Lead nicht gefunden" };
+    const lead = data as Pick<Lead, "status" | "naechste_aktion_am" | "kontakt_versuche">;
+    const ok = istErreicht(erg);
+
+    await erstkontaktSetzen(db, leadId, companyId);
+    const payload: Record<string, unknown> = {};
+    let versuche = lead.kontakt_versuche ?? 0;
+    if (ok) {
+      if (lead.status === "neu") {
+        payload.status = "kontaktiert";
+        payload.geaendert_von = profile.id;
+      }
+      if (lead.naechste_aktion_am && new Date(lead.naechste_aktion_am) < heuteEnde()) {
+        payload.naechste_aktion_am = null;
+      }
+    } else {
+      versuche += 1;
+      payload.kontakt_versuche = versuche;
+    }
+    if (rueckruf !== undefined) payload.naechste_aktion_am = rueckruf;
+    if (Object.keys(payload).length > 0) {
+      const { error } = await db.from("leads").update(payload).eq("id", leadId).eq("company_id", companyId);
+      if (error) return { data: null, error: error.message };
+    }
+
+    await ergebnisEintragen(db, { leadId, companyId, userId: profile.id, ergebnis: erg });
+    const text = ERGEBNIS_TEXT[erg](versuche) + (rueckruf ? ` – Rückruf ${zeitpunktText(rueckruf)}` : "");
+    await aktivitaet(db, leadId, profile.id, ok ? "anruf" : "nicht_erreicht", text);
+    neuLaden(leadId);
+    return { data: { versuche, erreicht: ok }, error: null };
   } catch (err) {
     return { data: null, error: fehlerText(err) };
   }
@@ -308,68 +405,14 @@ export async function kontaktProtokollieren(
 
 /** „Erreicht“: Neu → Kontaktiert, fälliger Rückruf erledigt. */
 export async function erreicht(id: string): Promise<Ergebnis<true>> {
-  const { companyId, profile } = await requireKunde();
-  try {
-    const leadId = uuid.parse(id);
-    const db = createAdminClient();
-    const { data } = await db
-      .from("leads")
-      .select("status, naechste_aktion_am")
-      .eq("id", leadId)
-      .eq("company_id", companyId)
-      .maybeSingle();
-    if (!data) return { data: null, error: "Lead nicht gefunden" };
-    const lead = data as Pick<Lead, "status" | "naechste_aktion_am">;
-
-    await erstkontaktSetzen(db, leadId, companyId);
-    const payload: Record<string, unknown> = {};
-    if (lead.status === "neu") {
-      payload.status = "kontaktiert";
-      payload.geaendert_von = profile.id;
-    }
-    if (lead.naechste_aktion_am && new Date(lead.naechste_aktion_am) < heuteEnde()) {
-      payload.naechste_aktion_am = null;
-    }
-    if (Object.keys(payload).length > 0) {
-      const { error } = await db.from("leads").update(payload).eq("id", leadId).eq("company_id", companyId);
-      if (error) return { data: null, error: error.message };
-    }
-    await aktivitaet(db, leadId, profile.id, "anruf", "Erreicht");
-    neuLaden(leadId);
-    return { data: true, error: null };
-  } catch (err) {
-    return { data: null, error: fehlerText(err) };
-  }
+  const res = await anrufErgebnis(id, "erreicht");
+  return res.error ? { data: null, error: res.error } : { data: true, error: null };
 }
 
 /** „Nicht erreicht“: +1 Versuch, Aktivität, optional neuer Rückruf (null = keiner). */
 export async function nichtErreicht(id: string, rueckrufIso?: string | null): Promise<Ergebnis<number>> {
-  const { companyId, profile } = await requireKunde();
-  try {
-    const leadId = uuid.parse(id);
-    const rueckruf = z.string().datetime({ offset: true }).nullable().optional().parse(rueckrufIso);
-    const db = createAdminClient();
-    const { data } = await db
-      .from("leads")
-      .select("kontakt_versuche")
-      .eq("id", leadId)
-      .eq("company_id", companyId)
-      .maybeSingle();
-    if (!data) return { data: null, error: "Lead nicht gefunden" };
-    const versuche = ((data as { kontakt_versuche: number | null }).kontakt_versuche ?? 0) + 1;
-
-    const payload: Record<string, unknown> = { kontakt_versuche: versuche };
-    if (rueckruf !== undefined) payload.naechste_aktion_am = rueckruf;
-    const { error } = await db.from("leads").update(payload).eq("id", leadId).eq("company_id", companyId);
-    if (error) return { data: null, error: error.message };
-
-    const text = `Nicht erreicht (${versuche}. Versuch)${rueckruf ? ` – Rückruf ${zeitpunktText(rueckruf)}` : ""}`;
-    await aktivitaet(db, leadId, profile.id, "nicht_erreicht", text);
-    neuLaden(leadId);
-    return { data: versuche, error: null };
-  } catch (err) {
-    return { data: null, error: fehlerText(err) };
-  }
+  const res = await anrufErgebnis(id, "nicht_erreicht", rueckrufIso);
+  return res.error ? { data: null, error: res.error } : { data: res.data?.versuche ?? 0, error: null };
 }
 
 // ---------------------------------------------------------------------------

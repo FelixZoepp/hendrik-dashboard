@@ -26,6 +26,7 @@ import {
   type StufenWechselEingabe,
 } from "@/lib/crm/logik";
 import { stufeSetzen } from "@/app/(client)/leads/actions";
+import { TerminWahl } from "@/components/auswertung/termin-wahl";
 import type { LeadStatus, VerlustGrund } from "@/lib/types/database";
 
 export interface WechselLead {
@@ -43,6 +44,7 @@ interface Offen {
 
 /**
  * Stufenwechsel mit Pflichtangaben:
+ *   Termin vor Ort → Datum/Uhrzeit (Schnellwahl, darf offen bleiben) ·
  *   Angebot raus → Angebotswert (optional) · Auftrag → Auftragswert (Pflicht) · Verloren → Grund
  * Andere Stufen werden sofort gespeichert.
  */
@@ -64,7 +66,11 @@ export function useStufenWechsel() {
         toast.error(res.error);
         return false;
       }
-      toast.success(`Verschoben nach „${stufenInfo(e.stufe).label}“`);
+      toast.success(
+        e.stufe === "termin" && e.termin_beginn && stufeVon(lead.status) === "termin"
+          ? "Termin gespeichert"
+          : `Verschoben nach „${stufenInfo(e.stufe).label}“`,
+      );
       router.refresh();
       return true;
     } catch {
@@ -77,7 +83,7 @@ export function useStufenWechsel() {
 
   /** Startet den Wechsel; fertig(true) nach dem Speichern, fertig(false) bei Abbruch/Fehler. */
   async function starte(lead: WechselLead, stufe: Stufe, fertig?: (ok: boolean) => void) {
-    if (stufeVon(lead.status) === stufe && stufe !== "angebot" && stufe !== "auftrag") {
+    if (stufeVon(lead.status) === stufe && stufe !== "angebot" && stufe !== "auftrag" && stufe !== "termin") {
       fertig?.(false);
       return;
     }
@@ -138,19 +144,34 @@ function StufenDialog({
   }
 
   const titel =
-    stufe === "angebot" ? "Angebot raus" : stufe === "auftrag" ? "Auftrag bekommen ✅" : "Leider verloren ❌";
+    stufe === "termin"
+      ? "Termin vor Ort"
+      : stufe === "angebot"
+        ? "Angebot raus"
+        : stufe === "auftrag"
+          ? "Auftrag bekommen ✅"
+          : "Leider verloren ❌";
 
   return (
     <Dialog open={!!offen} onOpenChange={(o) => !o && onAbbruch()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-xl">{titel}</DialogTitle>
           <DialogDescription>
+            {stufe === "termin" && "Wann ist der Termin? Danach fragen wir dich kurz, wie er gelaufen ist."}
             {stufe === "angebot" && "Wie hoch ist das Angebot? (Kann leer bleiben)"}
             {stufe === "auftrag" && "Wie viel ist der Auftrag wert? Das brauchen wir für deinen Umsatz."}
             {stufe === "verloren" && "Woran lag es? Einfach antippen."}
           </DialogDescription>
         </DialogHeader>
+
+        {stufe === "termin" && (
+          <TerminWahl
+            className="py-2"
+            disabled={laeuft}
+            onWahl={(iso, art) => onSpeichern({ stufe, termin_beginn: iso, termin_art: art })}
+          />
+        )}
 
         {(stufe === "angebot" || stufe === "auftrag") && (
           <form
@@ -212,9 +233,17 @@ function StufenDialog({
           <Button variant="outline" size="lg" onClick={onAbbruch} disabled={laeuft}>
             Abbrechen
           </Button>
-          <Button size="lg" onClick={absenden} disabled={laeuft || (stufe === "verloren" && !grund)}>
-            {laeuft ? "Speichert…" : "Speichern"}
-          </Button>
+          {stufe === "termin" ? (
+            offen && stufeVon(offen.lead.status) !== "termin" && (
+              <Button variant="ghost" size="lg" onClick={() => onSpeichern({ stufe })} disabled={laeuft}>
+                Datum steht noch nicht fest
+              </Button>
+            )
+          ) : (
+            <Button size="lg" onClick={absenden} disabled={laeuft || (stufe === "verloren" && !grund)}>
+              {laeuft ? "Speichert…" : "Speichern"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

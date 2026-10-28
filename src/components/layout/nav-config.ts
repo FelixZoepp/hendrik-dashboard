@@ -1,6 +1,7 @@
 import type { UserRole } from "@/lib/types/database";
 import {
   BarChart3,
+  ChartNoAxesCombined,
   Magnet,
   ClipboardList,
   FolderKanban,
@@ -50,6 +51,7 @@ export const TEAM_NAV: NavGroup[] = [
       { label: "Marketing", href: "/marketing", icon: Megaphone, roles: ["admin"] },
       { label: "Fulfillment", href: "/fulfillment", icon: FolderKanban, roles: ["admin", "fulfillment"] },
       { label: "Kunden", href: "/kunden", icon: Building2, roles: TEAM },
+      { label: "Kunden-Auswertung", href: "/kunden/auswertung", icon: ChartNoAxesCombined, roles: TEAM },
       { label: "Team", href: "/team", icon: Users, roles: ["admin"] },
     ],
   },
@@ -73,6 +75,7 @@ export const KUNDEN_NAV: NavGroup[] = [
     items: [
       { label: "Start", href: "/dashboard", icon: LayoutDashboard, roles: KUNDE },
       { label: "Anfragen", href: "/leads", icon: ClipboardList, roles: KUNDE },
+      { label: "Auswertung", href: "/auswertung", icon: ChartNoAxesCombined, roles: KUNDE },
     ],
   },
   {
