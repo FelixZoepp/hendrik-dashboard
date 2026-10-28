@@ -10,7 +10,8 @@
     "test:whatsapp": "node --no-warnings scripts/test-whatsapp-logik.mjs",
     "test:gespraeche": "node --no-warnings scripts/test-gespraeche.mjs",
     "test:verlustgrund": "node --no-warnings scripts/test-verlustgrund.mjs",
-    "test:funnel": "node --no-warnings scripts/test-funnel.mjs"
+    "test:funnel": "node --no-warnings scripts/test-funnel.mjs",
+    "test:kontext": "node --no-warnings scripts/test-kontext.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

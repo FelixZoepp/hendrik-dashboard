@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireKunde } from "@/lib/kontext";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/lead-utils";
 import type { Lead, LeadSla, SlaAmpel } from "@/lib/types/database";
@@ -24,19 +25,8 @@ function formatMinuten(min: number): string {
 }
 
 export default async function ClientDashboardPage() {
+  const { companyId } = await requireKunde();
   const supabase = createAdminClient();
-
-  const companyId = null;
-  if (!companyId) {
-    return (
-      <div className="space-y-6">
-        <h1 className="fern-page-title">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Dein Konto ist noch keinem Unternehmen zugeordnet.
-        </p>
-      </div>
-    );
-  }
 
   const [leadsResult, slaResult] = await Promise.all([
     supabase

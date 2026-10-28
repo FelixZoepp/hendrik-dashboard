@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireKunde } from "@/lib/kontext";
 import { z } from "zod";
 import type {
   Lead,
@@ -12,39 +13,31 @@ import type {
   LeadQuelle,
 } from "@/lib/types/database";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// Regel (siehe src/lib/kontext.ts): Service-Client + IMMER company_id aus requireKunde().
+// requireKunde() steht vor try/catch, damit dessen redirect() nicht verschluckt wird.
 
-async function getCurrentProfile() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+type Db = ReturnType<typeof createAdminClient>;
 
-  if (authError || !user) {
-    throw new Error("Nicht authentifiziert");
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single();
-
-  if (profileError || !profile) {
-    throw new Error("Profil nicht gefunden");
-  }
-
-  return { user, profile: profile as { id: string; company_id: string | null; role: string } };
+async function gehoertZurFirma(db: Db, leadId: string, companyId: string) {
+  const { data } = await db.from("leads").select("id").eq("id", leadId).eq("company_id", companyId).maybeSingle();
+  return !!data;
 }
 
-async function isStaff(): Promise<boolean> {
-  const supabase = await createClient();
-  const { data } = await supabase.rpc("is_staff");
-  return data === true;
+function fehlerText(err: unknown) {
+  return err instanceof Error ? err.message : "Unbekannter Fehler";
 }
+
+const LEAD_STATUS = [
+  "neu",
+  "kontaktiert",
+  "termin_vereinbart",
+  "vor_ort_termin",
+  "angebot_raus",
+  "gewonnen",
+  "verloren",
+  "kein_interesse",
+  "nicht_erreicht",
+] as const;
 
 // ---------------------------------------------------------------------------
 // 1. getLeads
@@ -52,78 +45,48 @@ async function isStaff(): Promise<boolean> {
 
 const getLeadsFiltersSchema = z
   .object({
-    status: z
-      .enum([
-        "neu",
-        "kontaktiert",
-        "termin_vereinbart",
-        "vor_ort_termin",
-        "angebot_raus",
-        "gewonnen",
-        "verloren",
-        "kein_interesse",
-        "nicht_erreicht",
-      ])
-      .optional(),
+    status: z.enum(LEAD_STATUS).optional(),
     search: z.string().optional(),
-    company_id: z.string().uuid().optional(),
   })
   .optional();
 
 export async function getLeads(
-  filters?: { status?: LeadStatus; search?: string; company_id?: string }
+  filters?: { status?: LeadStatus; search?: string }
 ): Promise<{ data: (Lead & { company_name: string })[] | null; error: string | null }> {
+  const { companyId } = await requireKunde();
   try {
     const parsed = getLeadsFiltersSchema.parse(filters);
-    const supabase = await createClient();
-    const { profile } = await getCurrentProfile();
-    const staff = await isStaff();
+    const supabase = createAdminClient();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
     let query = supabase
       .from("leads")
       .select("*, companies!inner(name)")
-      .order("created_at", { ascending: false }) as any;
-
-    // Scope: clients see only their company's leads, staff sees all
-    if (!staff) {
-      if (!profile.company_id) {
-        return { data: [], error: null };
-      }
-      query = query.eq("company_id", profile.company_id);
-    } else if (parsed?.company_id) {
-      query = query.eq("company_id", parsed.company_id);
-    }
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false });
 
     if (parsed?.status) {
       query = query.eq("status", parsed.status);
     }
 
     if (parsed?.search) {
-      const term = `%${parsed.search}%`;
+      const term = `%${parsed.search.replace(/[,()]/g, " ")}%`;
       query = query.or(
         `vorname.ilike.${term},nachname.ilike.${term},email.ilike.${term},telefon.ilike.${term},ort.ilike.${term}`
       );
     }
 
     const { data, error } = await query;
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
+    if (error) return { data: null, error: error.message };
 
     type LeadWithCompany = Lead & { companies: { name: string } };
-
-    // Flatten the joined company name
-    const leads = ((data ?? []) as LeadWithCompany[]).map((row) => {
+    const leads = ((data ?? []) as unknown as LeadWithCompany[]).map((row) => {
       const { companies, ...lead } = row;
       return { ...lead, company_name: companies.name };
     });
 
     return { data: leads, error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }
 
@@ -139,36 +102,29 @@ export async function getLead(
   data: (Lead & { company_name: string; activities: LeadActivity[] }) | null;
   error: string | null;
 }> {
+  const { companyId } = await requireKunde();
   try {
     const validId = getLeadSchema.parse(id);
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
-    // Fetch lead with company name
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: leadRow, error: leadError } = await (supabase
+    const { data: leadRow, error: leadError } = await supabase
       .from("leads")
       .select("*, companies!inner(name)")
       .eq("id", validId)
-      .single() as any);
+      .eq("company_id", companyId)
+      .single();
 
-    if (leadError) {
-      return { data: null, error: (leadError as { message: string }).message };
-    }
+    if (leadError) return { data: null, error: leadError.message };
 
-    // Fetch activities
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: activities, error: activitiesError } = await (supabase
+    const { data: activities, error: activitiesError } = await supabase
       .from("lead_activities")
       .select("*")
       .eq("lead_id", validId)
-      .order("created_at", { ascending: false }) as any);
+      .order("created_at", { ascending: false });
 
-    if (activitiesError) {
-      return { data: null, error: (activitiesError as { message: string }).message };
-    }
+    if (activitiesError) return { data: null, error: activitiesError.message };
 
-    const typedRow = leadRow as Lead & { companies: { name: string } };
-    const { companies, ...lead } = typedRow;
+    const { companies, ...lead } = leadRow as unknown as Lead & { companies: { name: string } };
 
     return {
       data: {
@@ -179,8 +135,7 @@ export async function getLead(
       error: null,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }
 
@@ -190,17 +145,7 @@ export async function getLead(
 
 const updateLeadStatusSchema = z.object({
   id: z.string().uuid(),
-  status: z.enum([
-    "neu",
-    "kontaktiert",
-    "termin_vereinbart",
-    "vor_ort_termin",
-    "angebot_raus",
-    "gewonnen",
-    "verloren",
-    "kein_interesse",
-    "nicht_erreicht",
-  ]),
+  status: z.enum(LEAD_STATUS),
   auftragswert: z.number().positive().optional(),
   verlust_grund: z
     .enum([
@@ -217,10 +162,10 @@ export async function updateLeadStatus(
   id: string,
   data: { status: LeadStatus; auftragswert?: number; verlust_grund?: VerlustGrund }
 ): Promise<{ data: Lead | null; error: string | null }> {
+  const { companyId, profile } = await requireKunde();
   try {
     const validated = updateLeadStatusSchema.parse({ id, ...data });
 
-    // Business rules
     if (validated.status === "gewonnen" && !validated.auftragswert) {
       return { data: null, error: "Auftragswert ist bei Status 'gewonnen' erforderlich." };
     }
@@ -228,57 +173,47 @@ export async function updateLeadStatus(
       return { data: null, error: "Verlustgrund ist bei Status 'verloren' erforderlich." };
     }
 
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
-    // Get current status for the activity log
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: currentLead } = await (supabase
+    const { data: currentLead } = await supabase
       .from("leads")
       .select("status")
       .eq("id", validated.id)
-      .single() as any) as { data: { status: LeadStatus } | null };
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (!currentLead) return { data: null, error: "Lead nicht gefunden" };
+    const altStatus = (currentLead as { status: LeadStatus }).status;
 
     const updatePayload: Record<string, unknown> = {
       status: validated.status,
       updated_at: new Date().toISOString(),
     };
+    if (validated.auftragswert !== undefined) updatePayload.auftragswert = validated.auftragswert;
+    if (validated.verlust_grund !== undefined) updatePayload.verlust_grund = validated.verlust_grund;
 
-    if (validated.auftragswert !== undefined) {
-      updatePayload.auftragswert = validated.auftragswert;
-    }
-    if (validated.verlust_grund !== undefined) {
-      updatePayload.verlust_grund = validated.verlust_grund;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: updatedLead, error } = await (supabase
-      .from("leads") as any)
+    const { data: updatedLead, error } = await supabase
+      .from("leads")
       .update(updatePayload)
       .eq("id", validated.id)
+      .eq("company_id", companyId)
       .select()
       .single();
 
-    if (error) {
-      return { data: null, error: (error as { message: string }).message };
-    }
+    if (error) return { data: null, error: error.message };
 
-    // Log the status change as activity
-    const { user } = await getCurrentProfile();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    await (supabase.from("lead_activities") as any).insert({
+    await supabase.from("lead_activities").insert({
       lead_id: validated.id,
-      user_id: user.id,
+      user_id: profile.id,
       typ: "status_wechsel" as LeadActivityTyp,
-      inhalt: `Status: ${currentLead?.status ?? "unbekannt"} \u2192 ${validated.status}`,
-      alt_status: currentLead?.status ?? null,
+      inhalt: `Status: ${altStatus} → ${validated.status}`,
+      alt_status: altStatus,
       neu_status: validated.status,
     });
 
     revalidatePath("/leads", "page");
     return { data: updatedLead as Lead, error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }
 
@@ -291,62 +226,44 @@ const markAsContactedSchema = z.string().uuid();
 export async function markAsContacted(
   id: string
 ): Promise<{ data: Lead | null; error: string | null }> {
+  const { companyId, profile } = await requireKunde();
   try {
     const validId = markAsContactedSchema.parse(id);
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
-    // Only update if first_contact_at is not already set
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: currentLead, error: fetchError } = await (supabase
+    const { data: row, error: fetchError } = await supabase
       .from("leads")
       .select("first_contact_at, status")
       .eq("id", validId)
-      .single() as any) as {
-      data: { first_contact_at: string | null; status: LeadStatus } | null;
-      error: { message: string } | null;
-    };
+      .eq("company_id", companyId)
+      .maybeSingle();
 
-    if (fetchError) {
-      return { data: null, error: fetchError.message };
-    }
-
-    if (!currentLead) {
-      return { data: null, error: "Lead nicht gefunden" };
-    }
+    if (fetchError) return { data: null, error: fetchError.message };
+    if (!row) return { data: null, error: "Lead nicht gefunden" };
+    const currentLead = row as { first_contact_at: string | null; status: LeadStatus };
 
     const updatePayload: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
+    if (!currentLead.first_contact_at) updatePayload.first_contact_at = new Date().toISOString();
+    if (currentLead.status === "neu") updatePayload.status = "kontaktiert";
 
-    if (!currentLead.first_contact_at) {
-      updatePayload.first_contact_at = new Date().toISOString();
-    }
-
-    if (currentLead.status === "neu") {
-      updatePayload.status = "kontaktiert";
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: updatedLead, error } = await (supabase
-      .from("leads") as any)
+    const { data: updatedLead, error } = await supabase
+      .from("leads")
       .update(updatePayload)
       .eq("id", validId)
+      .eq("company_id", companyId)
       .select()
       .single();
 
-    if (error) {
-      return { data: null, error: (error as { message: string }).message };
-    }
+    if (error) return { data: null, error: error.message };
 
-    // Log activity if status changed
     if (currentLead.status === "neu") {
-      const { user } = await getCurrentProfile();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-      await (supabase.from("lead_activities") as any).insert({
+      await supabase.from("lead_activities").insert({
         lead_id: validId,
-        user_id: user.id,
+        user_id: profile.id,
         typ: "status_wechsel" as LeadActivityTyp,
-        inhalt: "Status: neu \u2192 kontaktiert",
+        inhalt: "Status: neu → kontaktiert",
         alt_status: "neu" as LeadStatus,
         neu_status: "kontaktiert" as LeadStatus,
       });
@@ -355,8 +272,7 @@ export async function markAsContacted(
     revalidatePath("/leads", "page");
     return { data: updatedLead as Lead, error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }
 
@@ -374,17 +290,19 @@ export async function addLeadActivity(
   leadId: string,
   data: { typ: LeadActivityTyp; inhalt: string }
 ): Promise<{ data: LeadActivity | null; error: string | null }> {
+  const { companyId, profile } = await requireKunde();
   try {
     const validated = addLeadActivitySchema.parse({ leadId, ...data });
-    const supabase = await createClient();
-    const { user } = await getCurrentProfile();
+    const supabase = createAdminClient();
+    if (!(await gehoertZurFirma(supabase, validated.leadId, companyId))) {
+      return { data: null, error: "Lead nicht gefunden" };
+    }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: activity, error } = await (supabase
-      .from("lead_activities") as any)
+    const { data: activity, error } = await supabase
+      .from("lead_activities")
       .insert({
         lead_id: validated.leadId,
-        user_id: user.id,
+        user_id: profile.id,
         typ: validated.typ,
         inhalt: validated.inhalt,
         alt_status: null,
@@ -393,15 +311,12 @@ export async function addLeadActivity(
       .select()
       .single();
 
-    if (error) {
-      return { data: null, error: (error as { message: string }).message };
-    }
+    if (error) return { data: null, error: error.message };
 
     revalidatePath("/leads", "page");
     return { data: activity as LeadActivity, error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }
 
@@ -420,42 +335,44 @@ export async function updateLeadDetails(
   id: string,
   data: { angebotswert?: number; naechste_aktion_am?: string; assigned_to?: string }
 ): Promise<{ data: Lead | null; error: string | null }> {
+  const { companyId } = await requireKunde();
   try {
     const validated = updateLeadDetailsSchema.parse({ id, ...data });
+    const supabase = createAdminClient();
 
     const updatePayload: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
-
-    if (validated.angebotswert !== undefined) {
-      updatePayload.angebotswert = validated.angebotswert;
-    }
-    if (validated.naechste_aktion_am !== undefined) {
-      updatePayload.naechste_aktion_am = validated.naechste_aktion_am;
-    }
+    if (validated.angebotswert !== undefined) updatePayload.angebotswert = validated.angebotswert;
+    if (validated.naechste_aktion_am !== undefined) updatePayload.naechste_aktion_am = validated.naechste_aktion_am;
     if (validated.assigned_to !== undefined) {
+      // Nur Personen derselben Firma (oder Team) zuweisen
+      const { data: person } = await supabase
+        .from("profiles")
+        .select("id, role, company_id")
+        .eq("id", validated.assigned_to)
+        .maybeSingle();
+      const p = person as { role: string; company_id: string | null } | null;
+      if (!p || (p.company_id !== companyId && !["admin", "sales", "fulfillment"].includes(p.role))) {
+        return { data: null, error: "Person gehört nicht zu dieser Firma" };
+      }
       updatePayload.assigned_to = validated.assigned_to;
     }
 
-    const supabase = await createClient();
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: updatedLead, error } = await (supabase
-      .from("leads") as any)
+    const { data: updatedLead, error } = await supabase
+      .from("leads")
       .update(updatePayload)
       .eq("id", validated.id)
+      .eq("company_id", companyId)
       .select()
       .single();
 
-    if (error) {
-      return { data: null, error: (error as { message: string }).message };
-    }
+    if (error) return { data: null, error: error.message };
 
     revalidatePath("/leads", "page");
     return { data: updatedLead as Lead, error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }
 
@@ -464,7 +381,6 @@ export async function updateLeadDetails(
 // ---------------------------------------------------------------------------
 
 const createLeadSchema = z.object({
-  company_id: z.string().uuid(),
   vorname: z.string().min(1, "Vorname ist erforderlich"),
   nachname: z.string().min(1, "Nachname ist erforderlich"),
   telefon: z.string().optional(),
@@ -475,9 +391,10 @@ const createLeadSchema = z.object({
   quelle: z.enum(["google_ads", "onepage", "manuell", "empfehlung"]).optional(),
 });
 
+/** company_id aus dem Formular wird ignoriert — es zählt immer die Firma des Kontexts. */
 export async function createLead(
   data: {
-    company_id: string;
+    company_id?: string;
     vorname: string;
     nachname: string;
     telefon?: string;
@@ -488,16 +405,15 @@ export async function createLead(
     quelle?: LeadQuelle;
   }
 ): Promise<{ data: Lead | null; error: string | null }> {
+  const { companyId, profile } = await requireKunde();
   try {
     const validated = createLeadSchema.parse(data);
-    const supabase = await createClient();
-    const { user } = await getCurrentProfile();
+    const supabase = createAdminClient();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- supabase-ssr generic limitation
-    const { data: newLead, error } = await (supabase
-      .from("leads") as any)
+    const { data: newLead, error } = await supabase
+      .from("leads")
       .insert({
-        company_id: validated.company_id,
+        company_id: companyId,
         vorname: validated.vorname,
         nachname: validated.nachname,
         telefon: validated.telefon ?? null,
@@ -506,27 +422,17 @@ export async function createLead(
         ort: validated.ort ?? null,
         anliegen: validated.anliegen ?? null,
         quelle: validated.quelle ?? "manuell",
-        campaign: null,
-        form_payload: null,
-        first_contact_at: null,
         status: "neu",
-        assigned_to: user.id,
-        angebotswert: null,
-        auftragswert: null,
-        verlust_grund: null,
-        naechste_aktion_am: null,
+        assigned_to: profile.id,
       })
       .select()
       .single();
 
-    if (error) {
-      return { data: null, error: (error as { message: string }).message };
-    }
+    if (error) return { data: null, error: error.message };
 
     revalidatePath("/leads", "page");
     return { data: newLead as Lead, error: null };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unbekannter Fehler";
-    return { data: null, error: message };
+    return { data: null, error: fehlerText(err) };
   }
 }

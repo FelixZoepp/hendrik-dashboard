@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import type { Company, CompanyStatus } from "@/lib/types/database";
-import { Building2, Mail, Phone, User, Search } from "lucide-react";
+import { Building2, Eye, Mail, MapPin, Phone, User, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ansichtStarten } from "@/lib/ansicht-aktionen";
+import { NeuerKundeDialog } from "./firma-formular";
 
 const STATUS_TABS: { label: string; value: CompanyStatus | "alle" }[] = [
   { label: "Alle", value: "alle" },
@@ -39,9 +42,10 @@ const currencyFormatter = new Intl.NumberFormat("de-DE", {
 
 interface KundenViewProps {
   companies: Company[];
+  hinweis: string | null;
 }
 
-export function KundenView({ companies }: KundenViewProps) {
+export function KundenView({ companies, hinweis }: KundenViewProps) {
   const [activeTab, setActiveTab] = useState<CompanyStatus | "alle">("alle");
   const [search, setSearch] = useState("");
 
@@ -59,7 +63,8 @@ export function KundenView({ companies }: KundenViewProps) {
           c.name.toLowerCase().includes(q) ||
           c.ansprechpartner?.toLowerCase().includes(q) ||
           c.email?.toLowerCase().includes(q) ||
-          c.branche?.toLowerCase().includes(q)
+          c.branche?.toLowerCase().includes(q) ||
+          c.ort?.toLowerCase().includes(q)
       );
     }
 
@@ -68,12 +73,21 @@ export function KundenView({ companies }: KundenViewProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="fern-page-title">Kunden</h1>
-        <p className="text-sm text-muted-foreground">
-          {filtered.length} {filtered.length === 1 ? "Kunde" : "Kunden"}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="fern-page-title">Kunden</h1>
+          <p className="text-sm text-muted-foreground">
+            {filtered.length} {filtered.length === 1 ? "Kunde" : "Kunden"}
+          </p>
+        </div>
+        <NeuerKundeDialog />
       </div>
+
+      {hinweis === "ansicht" && (
+        <p className="rounded-xl bg-accent px-3 py-2 text-sm text-accent-foreground">
+          Das Kundenportal siehst du über „Als Kunde ansehen“ bei der jeweiligen Firma.
+        </p>
+      )}
 
       {/* Filter tabs */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -131,10 +145,10 @@ export function KundenView({ companies }: KundenViewProps) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((company) => (
+            <div key={company.id} className="flex flex-col fern-card">
             <Link
-              key={company.id}
               href={`/kunden/${company.id}`}
-              className="block fern-card p-6 transition-colors hover:bg-accent/50"
+              className="block flex-1 rounded-t-[inherit] p-6 pb-4 transition-colors hover:bg-accent/50"
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
@@ -174,6 +188,12 @@ export function KundenView({ companies }: KundenViewProps) {
                     <span className="truncate">{company.telefon}</span>
                   </div>
                 )}
+                {(company.ort || company.region) && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <MapPin className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{[company.ort, company.region].filter(Boolean).join(" · ")}</span>
+                  </div>
+                )}
               </div>
 
               <div className="mt-3 flex items-center justify-between border-t border-border/50 pt-3">
@@ -200,6 +220,14 @@ export function KundenView({ companies }: KundenViewProps) {
                 )}
               </div>
             </Link>
+            <form action={ansichtStarten} className="px-6 pb-5">
+              <input type="hidden" name="company_id" value={company.id} />
+              <Button type="submit" size="sm" variant="secondary" className="w-full">
+                <Eye />
+                Als Kunde ansehen
+              </Button>
+            </form>
+            </div>
           ))}
         </div>
       )}

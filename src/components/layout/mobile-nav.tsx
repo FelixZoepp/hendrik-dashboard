@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Menu } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
+import { abmelden } from "@/lib/ansicht-aktionen";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -60,6 +61,14 @@ export function MobileNav({ role }: { role: UserRole }) {
                 );
               })}
             </ul>
+            <button
+              type="button"
+              onClick={() => abmelden()}
+              className="mt-4 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4 shrink-0" />
+              Abmelden
+            </button>
           </nav>
         </SheetContent>
       </Sheet>

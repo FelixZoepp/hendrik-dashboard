@@ -51,6 +51,8 @@ export interface Profile {
   company_id: string | null;
   avatar_url: string | null;
   active: boolean;
+  /** Login-E-Mail (Kopie aus auth.users, Migration 00013) */
+  email: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -63,6 +65,10 @@ export interface Company {
   email: string | null;
   telefon: string | null;
   adresse: string | null;
+  /** Migration 00013 */
+  ort: string | null;
+  /** Migration 00013 */
+  region: string | null;
   status: CompanyStatus;
   start_datum: string | null;
   ende_datum: string | null;

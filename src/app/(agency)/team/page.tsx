@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireTeam } from "@/lib/kontext";
 
 import { TeamView } from "./team-view";
 
@@ -15,6 +16,7 @@ interface ProfileWithCompany {
   role: string;
   company_id: string | null;
   avatar_url: string | null;
+  email?: string | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -28,15 +30,20 @@ interface CloseUser {
   rolle: string;
 }
 
-export default async function TeamPage() {
-
+export default async function TeamPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ fehler?: string }>;
+}) {
+  const ctx = await requireTeam(["admin"]);
+  const { fehler } = await searchParams;
   const supabase = createAdminClient();
 
   const [profilesRes, closeUsersRes] = await Promise.all([
     supabase
       .from("profiles")
       .select("*, companies(name)")
-      .eq("active", true)
+      .order("active", { ascending: false })
       .order("full_name", { ascending: true }),
     supabase.from("close_users").select("*"),
   ]);
@@ -45,6 +52,8 @@ export default async function TeamPage() {
     <TeamView
       profiles={(profilesRes.data as ProfileWithCompany[]) ?? []}
       closeUsers={(closeUsersRes.data as CloseUser[]) ?? []}
+      eigeneId={ctx.profile.id}
+      fehler={fehler ?? null}
     />
   );
 }

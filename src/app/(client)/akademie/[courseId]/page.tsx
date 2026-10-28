@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireKunde } from "@/lib/kontext";
 import { CourseDetail } from "./course-detail";
 import type { Metadata } from "next";
 
@@ -26,7 +27,7 @@ export default async function CourseDetailPage({
   params: Promise<{ courseId: string }>;
 }) {
   const { courseId } = await params;
-  const userId = "";
+  const userId = (await requireKunde()).profile.id;
   const supabase = createAdminClient();
 
   const [courseRes, progressRes] = await Promise.all([
