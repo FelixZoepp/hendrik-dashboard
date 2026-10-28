@@ -10,6 +10,7 @@ export function AppShell({
   userName,
   firmenName = null,
   impersoniert = false,
+  glocke = null,
   children,
 }: {
   /** Rolle für die Navigation (beim „Als Kunde ansehen“: client_owner). */
@@ -17,6 +18,8 @@ export function AppShell({
   userName: string;
   firmenName?: string | null;
   impersoniert?: boolean;
+  /** Kundenportal: Glocke mit Meldungen (Topbar + Mobil) */
+  glocke?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -37,8 +40,8 @@ export function AppShell({
       <div className="flex min-h-0 flex-1 gap-4 overflow-hidden lg:p-4">
         <Sidebar role={role} />
         <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-hidden">
-          <MobileNav role={role} />
-          <Topbar role={role} userName={userName} firmenName={firmenName} />
+          <MobileNav role={role} glocke={glocke} />
+          <Topbar role={role} userName={userName} firmenName={firmenName} glocke={glocke} />
           <main className="flex-1 overflow-y-auto bg-background px-4 py-6 lg:rounded-[1.75rem] lg:px-8 lg:py-8">
             {children}
           </main>

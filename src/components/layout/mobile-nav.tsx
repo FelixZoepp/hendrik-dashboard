@@ -18,7 +18,7 @@ import { useState } from "react";
 import { Brand } from "./brand";
 import { navGroupsFor, isActivePath } from "./nav-config";
 
-export function MobileNav({ role }: { role: UserRole }) {
+export function MobileNav({ role, glocke = null }: { role: UserRole; glocke?: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const items = navGroupsFor(role).flatMap((g) => g.items);
@@ -73,6 +73,7 @@ export function MobileNav({ role }: { role: UserRole }) {
         </SheetContent>
       </Sheet>
       <div className="ml-2"><Brand /></div>
+      {glocke && <div className="ml-auto">{glocke}</div>}
     </div>
   );
 }

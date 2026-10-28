@@ -1,5 +1,6 @@
 import { AppShell } from "@/components/layout/app-shell";
 import { requireKunde } from "@/lib/kontext";
+import { Glocke } from "@/components/eingang/glocke";
 
 export default async function ClientLayout({
   children,
@@ -13,6 +14,7 @@ export default async function ClientLayout({
       userName={ctx.profile.full_name || ctx.email || "Kunde"}
       firmenName={ctx.company.name}
       impersoniert={ctx.impersoniert}
+      glocke={<Glocke companyId={ctx.companyId} userId={ctx.profile.id} impersoniert={ctx.impersoniert} />}
     >
       {children}
     </AppShell>
