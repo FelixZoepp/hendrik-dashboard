@@ -13,6 +13,7 @@ import {
   leseWebhook,
   leseMapping,
   metaConfig,
+  metaKonflikt,
   neuerToken,
   testBody,
   type MappingZiel,
@@ -39,6 +40,18 @@ async function ladeQuelle(id: string): Promise<LeadQuelleZeile | null> {
 }
 
 const neuLaden = (companyId: string) => revalidatePath(`/kunden/${companyId}`);
+
+/** Fehlertext, wenn eine andere aktive Meta-Quelle dieselbe Seite/Formulare abdeckt */
+async function metaKonfliktText(eigeneId: string | null, config: Record<string, unknown>): Promise<string | null> {
+  const db = createAdminClient();
+  const { data, error } = await db.from("lead_quellen").select("id, company_id, aktiv, config, name").eq("art", "meta").eq("aktiv", true);
+  if (error) return `Prüfung fehlgeschlagen: ${error.message}`;
+  const andere = (data ?? []) as Array<Pick<LeadQuelleZeile, "id" | "company_id" | "aktiv" | "config" | "name">>;
+  const k = metaKonflikt(andere, eigeneId, config);
+  if (!k) return null;
+  const { data: firma } = await db.from("companies").select("name").eq("id", k.company_id).maybeSingle();
+  return `Diese Seite ist schon beim Eingang „${k.name}“ (${firma?.name ?? "andere Firma"}) aktiv. Bitte je Eingang eigene Formular-IDs ohne Überschneidung eintragen oder den anderen Eingang ausschalten.`;
+}
 
 /** Meta-Felder aus dem Formular (Seiten-ID, Formular-IDs, optional eigene Token-Variable) */
 function metaAusFormular(fd: FormData): { config: Record<string, unknown> } | { fehler: string } {
@@ -84,6 +97,8 @@ export async function quelleAnlegen(_vorher: AktionStatus, fd: FormData): Promis
     const m = metaAusFormular(fd);
     if ("fehler" in m) return FEHLER(m.fehler);
     if (!m.config.page_id) return FEHLER("Für Meta bitte die Seiten-ID (Facebook-Seite) eintragen.");
+    const konflikt = await metaKonfliktText(null, m.config);
+    if (konflikt) return FEHLER(konflikt);
     config = m.config;
   }
 
@@ -137,6 +152,8 @@ export async function quelleEinstellungen(_vorher: AktionStatus, fd: FormData): 
     const m = metaAusFormular(fd);
     if ("fehler" in m) return FEHLER(m.fehler);
     if (!m.config.page_id) return FEHLER("Die Seiten-ID darf nicht leer sein.");
+    const konflikt = await metaKonfliktText(q.id, m.config);
+    if (konflikt) return FEHLER(konflikt);
     config = { ...config, ...m.config };
     if (!m.config.token_env) delete config.token_env;
   }

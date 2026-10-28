@@ -98,9 +98,20 @@ export function bereichFuer(pfad: string): Bereich {
 
 /** Nur relative Pfade derselben Seite als Rücksprungziel (kein Open Redirect). */
 export function sichererZielpfad(ziel: string | null | undefined, standard = "/"): string {
-  if (!ziel || !ziel.startsWith("/") || ziel.startsWith("//") || ziel.startsWith("/\\")) return standard;
-  if (passt(ziel, "/login")) return standard;
-  return ziel;
+  if (!ziel || !ziel.startsWith("/") || ziel.startsWith("//")) return standard;
+  // Steuerzeichen, Leerraum und Backslash: Browser entfernen/normalisieren sie (z. B. "/\t/boese.de" → "//boese.de").
+  if (/[\u0000-\u0020\u007f-\u00a0\\]/.test(ziel)) return standard;
+  const BASIS = "https://x.invalid";
+  let url: URL;
+  try {
+    url = new URL(ziel, BASIS);
+  } catch {
+    return standard;
+  }
+  if (url.origin !== BASIS) return standard;
+  const pfad = url.pathname + url.search + url.hash;
+  if (!pfad.startsWith("/") || pfad.startsWith("//") || passt(url.pathname, "/login")) return standard;
+  return pfad;
 }
 
 export interface ZugriffEingabe {
@@ -185,4 +196,19 @@ export function wirksameFirma(e: {
 export function darfZugangVerwalten(handelnd: Rolle, zielRolle: Rolle): boolean {
   if (handelnd === "admin") return true;
   return istTeamRolle(handelnd) && istKundenRolle(zielRolle);
+}
+
+/**
+ * Bestehendes Profil darf beim Zugang-Anlegen nicht still umgebaut werden:
+ * Team-Profil nie zur Kundenrolle, Kundenzugang nie in eine andere Firma umhängen.
+ * Ergebnis: null = in Ordnung, "team_zu_kunde" oder "andere_firma".
+ */
+export function zugangUmbauGesperrt(
+  alt: { rolle: string; companyId: string | null } | null,
+  neu: { rolle: Rolle; companyId: string | null },
+): "team_zu_kunde" | "andere_firma" | null {
+  if (!alt) return null;
+  if (istTeamRolle(alt.rolle) && istKundenRolle(neu.rolle)) return "team_zu_kunde";
+  if (istKundenRolle(alt.rolle) && istKundenRolle(neu.rolle) && alt.companyId && alt.companyId !== neu.companyId) return "andere_firma";
+  return null;
 }

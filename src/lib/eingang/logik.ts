@@ -615,11 +615,38 @@ export const META_STANDARD_TOKEN_ENV = "META_LEADS_ACCESS_TOKEN";
  * sonst Quelle derselben Seite ohne Formular-Liste. Nur aktive Quellen.
  */
 export function metaZuordnung<Q extends MetaQuelle>(quellen: Q[], pageId: string | null, formId: string | null): Q | null {
-  if (!pageId) return null;
+  const treffer = metaTreffer(quellen, pageId, formId);
+  return treffer.length === 1 ? treffer[0] : null;
+}
+
+/**
+ * Alle Kandidaten nach derselben Regel wie metaZuordnung. Mehr als ein Treffer = mehrdeutig
+ * (der Webhook speichert dann nicht, statt den Lead zufällig einer Firma zu geben).
+ */
+export function metaTreffer<Q extends MetaQuelle>(quellen: Q[], pageId: string | null, formId: string | null): Q[] {
+  if (!pageId) return [];
   const passend = quellen.filter((q) => q.aktiv && metaConfig(q.config).pageId === pageId);
-  const mitFormular = passend.find((q) => formId && metaConfig(q.config).formIds.includes(formId));
-  if (mitFormular) return mitFormular;
-  return passend.find((q) => metaConfig(q.config).formIds.length === 0) ?? null;
+  const mitFormular = passend.filter((q) => formId && metaConfig(q.config).formIds.includes(formId));
+  if (mitFormular.length) return mitFormular;
+  return passend.filter((q) => metaConfig(q.config).formIds.length === 0);
+}
+
+/**
+ * Konflikt beim Anlegen/Speichern einer Meta-Quelle: andere aktive Meta-Quelle mit derselben
+ * Seiten-ID, bei der eine Formular-Liste leer ist (= alle Formulare) oder sich die Listen überschneiden.
+ */
+export function metaKonflikt<Q extends MetaQuelle>(andere: Q[], eigeneId: string | null, config: unknown): Q | null {
+  const neu = metaConfig(config);
+  if (!neu.pageId) return null;
+  return (
+    andere.find((q) => {
+      if (!q.aktiv || q.id === eigeneId) return false;
+      const alt = metaConfig(q.config);
+      if (alt.pageId !== neu.pageId) return false;
+      if (!alt.formIds.length || !neu.formIds.length) return true;
+      return alt.formIds.some((f) => neu.formIds.includes(f));
+    }) ?? null
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -733,6 +760,7 @@ export function leadZeile(
     anzeigengruppe: l.anzeigengruppe,
     formular: l.formular,
     kampagne_id: l.kampagneId,
+    ist_test: l.test,
   };
 }
 

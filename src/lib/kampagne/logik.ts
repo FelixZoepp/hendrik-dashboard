@@ -393,9 +393,12 @@ export interface LeadZeile {
   auftragswert: number | string | null;
   angebotswert?: number | string | null;
   created_at: string;
+  /** Testlead (00014) – zählt nie */
+  ist_test?: boolean | null;
 }
 
-export function istWerbeLead(l: Pick<LeadZeile, "quelle">): boolean {
+export function istWerbeLead(l: Pick<LeadZeile, "quelle" | "ist_test">): boolean {
+  if (l.ist_test) return false;
   return !(NICHT_WERBE_QUELLEN as readonly string[]).includes(l.quelle ?? "");
 }
 

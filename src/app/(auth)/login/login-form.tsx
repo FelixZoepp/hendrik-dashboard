@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { sichererZielpfad } from "@/lib/zugriff";
 
 function deutscheMeldung(text: string): string {
   const t = text.toLowerCase();
@@ -39,7 +40,7 @@ export function LoginForm({
         setLoading(false);
         return;
       }
-      window.location.href = next;
+      window.location.href = sichererZielpfad(next, "/");
     } catch {
       setMeldung("Keine Verbindung. Bitte prüfe dein Internet.");
       setLoading(false);

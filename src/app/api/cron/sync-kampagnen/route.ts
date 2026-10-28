@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { gleichSicher } from "@/lib/eingang/logik";
 import { syncKampagnenMitLog } from "@/lib/kampagne/sync";
 
 export const maxDuration = 300;
 
 /** Täglich: Werbekosten der letzten 30 Tage je zugeordneter Kampagne → kampagnen_kosten_tag. */
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return NextResponse.json({ error: "Nicht eingerichtet" }, { status: 503 });
+  if (!gleichSicher(request.headers.get("authorization"), `Bearer ${secret}`)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

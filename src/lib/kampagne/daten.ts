@@ -55,19 +55,22 @@ type LeadMitKampagne = LeadZeile & { kampagne_id?: string | null };
 const fehltTabelle = (msg: string) => /does not exist|schema cache|relation .* not exist|Could not find the table/i.test(msg);
 
 async function ladeLeads(db: SupabaseClient, companyId: string, z: Zeitraum): Promise<LeadMitKampagne[]> {
-  const abfrage = (spalten: string) => () =>
-    db
+  const abfrage = (spalten: string, ohneTest: boolean) => () => {
+    let q = db
       .from("leads")
       .select(spalten, { count: "exact" })
       .eq("company_id", companyId)
       .gte("created_at", z.start.toISOString())
-      .lt("created_at", z.ende.toISOString())
-      .order("id");
+      .lt("created_at", z.ende.toISOString());
+    // Testleads nie mitzählen (ist_test kommt mit 00014)
+    if (ohneTest) q = q.eq("ist_test", false);
+    return q.order("id");
+  };
   try {
-    return await fetchAll<LeadMitKampagne>(abfrage("status, quelle, auftragswert, angebotswert, created_at, kampagne_id"));
+    return await fetchAll<LeadMitKampagne>(abfrage("status, quelle, auftragswert, angebotswert, created_at, kampagne_id, ist_test", true));
   } catch {
-    // kampagne_id kommt erst mit 00014
-    return fetchAll<LeadMitKampagne>(abfrage("status, quelle, auftragswert, angebotswert, created_at"));
+    // kampagne_id/ist_test kommen erst mit 00014
+    return fetchAll<LeadMitKampagne>(abfrage("status, quelle, auftragswert, angebotswert, created_at", false));
   }
 }
 

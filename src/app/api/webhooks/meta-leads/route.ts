@@ -1,6 +1,6 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { gleichSicher, leseMetaAenderungen, leseMetaLead, metaSignaturGueltig, metaZuordnung, type MetaAenderung } from "@/lib/eingang/logik";
+import { gleichSicher, leseMetaAenderungen, leseMetaLead, metaSignaturGueltig, metaTreffer, metaZuordnung, type MetaAenderung } from "@/lib/eingang/logik";
 import {
   emailAnBetrieb,
   holeMetaLead,
@@ -86,7 +86,18 @@ async function verarbeite(
   quellen: LeadQuelleZeile[],
   a: MetaAenderung,
 ): Promise<{ leadgen_id: string; status: string; id?: string | null }> {
-  const quelle = metaZuordnung(quellen, a.pageId, a.formId);
+  const treffer = metaTreffer(quellen, a.pageId, a.formId);
+  if (treffer.length > 1) {
+    await protokolliere(db, {
+      quelle_id: null,
+      company_id: null,
+      status: "fehler",
+      payload: { aenderung: a, quellen: treffer.map((q) => ({ id: q.id, company_id: q.company_id })) },
+      fehler: `Zuordnung mehrdeutig: ${treffer.length} aktive Eingänge für Meta-Seite ${a.pageId ?? "?"}${a.formId ? ` / Formular ${a.formId}` : ""} – nichts gespeichert, Formular-IDs eindeutig verteilen`,
+    });
+    return { leadgen_id: a.leadgenId, status: "fehler" };
+  }
+  const quelle = treffer[0] ?? null;
   if (!quelle) {
     const aus = metaZuordnung(quellen.map((q) => ({ ...q, aktiv: true })), a.pageId, a.formId);
     await protokolliere(db, {

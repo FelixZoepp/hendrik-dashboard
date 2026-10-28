@@ -7,6 +7,7 @@ import {
   berlinDatum,
   euro,
   fasseZusammen,
+  istWerbeLead,
   freierZeitraum,
   leadsAusAktionen,
   leseMetaInsight,
@@ -80,6 +81,13 @@ test("Leads zählen: Werbe-Leads, Termine, Aufträge, Umsatz", () => {
     l("neu", "empfehlung"),
   ]);
   assert.deepEqual(z, { leads: 7, termine: 5, auftraege: 2, umsatz: 4500.5 });
+});
+test("Testleads zählen nie", () => {
+  const basis = { status: "gewonnen", quelle: "meta", auftragswert: 1000, created_at: "2026-10-05T10:00:00Z" };
+  assert.equal(istWerbeLead({ quelle: "meta", ist_test: true }), false);
+  assert.equal(istWerbeLead({ quelle: "meta", ist_test: false }), true);
+  assert.equal(istWerbeLead({ quelle: "meta" }), true);
+  assert.deepEqual(zaehleLeads([basis, { ...basis, ist_test: true }]), { leads: 1, termine: 1, auftraege: 1, umsatz: 1000 });
 });
 
 console.log("Texte");

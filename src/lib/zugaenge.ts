@@ -2,7 +2,7 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Kontext } from "@/lib/kontext";
 import type { UserRole } from "@/lib/types/database";
-import { darfZugangVerwalten, istKundenRolle } from "@/lib/zugriff";
+import { darfZugangVerwalten, istKundenRolle, zugangUmbauGesperrt } from "@/lib/zugriff";
 
 // Zugänge anlegen: erzeugt einen Link zum Kopieren. Es wird KEINE E-Mail verschickt
 // (generateLink sendet nichts; inviteUserByEmail/resetPasswordForEmail bewusst nicht benutzt).
@@ -63,6 +63,14 @@ export async function zugangsLinkErzeugen(
   const alt = bisher as { role: UserRole; company_id: string | null } | null;
   if (alt && !darfZugangVerwalten(handelnd.rolle, alt.role)) {
     return fehler("Diese E-Mail gehört zu einem Team-Zugang. Das kann nur ein Admin ändern.");
+  }
+  const gesperrt = zugangUmbauGesperrt(alt && { rolle: alt.role, companyId: alt.company_id }, { rolle: eingabe.rolle, companyId: eingabe.companyId });
+  if (gesperrt === "team_zu_kunde") {
+    return fehler("Diese E-Mail gehört zu einem Team-Zugang und kann kein Kundenzugang werden.");
+  }
+  if (gesperrt === "andere_firma") {
+    const { data: firma } = await db.from("companies").select("name").eq("id", alt!.company_id!).maybeSingle();
+    return fehler(`Diese E-Mail gehört bereits zu Firma ${(firma as { name: string } | null)?.name ?? "(unbekannt)"}.`);
   }
   if (userId === handelnd.profile.id && eingabe.rolle !== handelnd.rolle) {
     return fehler("Deine eigene Rolle kannst du hier nicht ändern.");

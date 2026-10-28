@@ -18,7 +18,9 @@ import {
   lesePerspective,
   leseWebhook,
   metaConfig,
+  metaKonflikt,
   metaSignaturGueltig,
+  metaTreffer,
   metaZuordnung,
   neuerToken,
   perPfad,
@@ -168,6 +170,8 @@ test("Testlead wird markiert gespeichert", () => {
   const z = leadZeile(lead, { id: "q1", company_id: "c1", art: "google", name: "Google" }, "google:x", google);
   assert.equal(z.quelle, "google_ads");
   assert.equal(z.utm.test, "ja");
+  assert.equal(z.ist_test, true);
+  assert.equal(leadZeile({ ...lead, test: false }, { id: "q1", company_id: "c1", art: "google", name: "Google" }, "google:y", google).ist_test, false);
   assert.equal(z.antworten[0].frage, "Hinweis");
   assert.equal(z.status, "neu");
   assert.equal(z.company_id, "c1");
@@ -286,6 +290,37 @@ test("Zuordnung Seite/Formular", () => {
   assert.equal(metaZuordnung(q, "222", null), null);
   assert.equal(metaZuordnung(q, null, null), null);
   assert.equal(metaZuordnung(q, "333", null), null);
+});
+test("Mehrdeutige Zuordnung → kein Treffer", () => {
+  const q = [
+    { id: "a", company_id: "c1", aktiv: true, config: { page_id: "111", form_ids: [] } },
+    { id: "b", company_id: "c2", aktiv: true, config: { page_id: "111", form_ids: [] } },
+    { id: "x", company_id: "c3", aktiv: true, config: { page_id: "222", form_ids: ["500"] } },
+    { id: "y", company_id: "c4", aktiv: true, config: { page_id: "222", form_ids: ["500", "600"] } },
+  ];
+  assert.equal(metaTreffer(q, "111", null).length, 2);
+  assert.equal(metaZuordnung(q, "111", null), null);
+  assert.equal(metaTreffer(q, "222", "700").length, 0);
+  assert.equal(metaZuordnung(q, "222", "500"), null);
+  assert.equal(metaZuordnung(q, "222", "600")?.id, "y");
+});
+test("Konflikt beim Anlegen/Speichern einer Meta-Quelle", () => {
+  const andere = [
+    { id: "a", company_id: "c1", aktiv: true, config: { page_id: "111", form_ids: ["1001"] } },
+    { id: "aus", company_id: "c2", aktiv: false, config: { page_id: "222", form_ids: [] } },
+  ];
+  // eine Liste leer
+  assert.equal(metaKonflikt(andere, null, { page_id: "111", form_ids: [] })?.id, "a");
+  // Überschneidung
+  assert.equal(metaKonflikt(andere, null, { page_id: "111", form_ids: ["1002", "1001"] })?.id, "a");
+  // getrennte Formulare ok
+  assert.equal(metaKonflikt(andere, null, { page_id: "111", form_ids: ["1002"] }), null);
+  // andere Seite / ausgeschaltete Quelle / sich selbst
+  assert.equal(metaKonflikt(andere, null, { page_id: "333", form_ids: [] }), null);
+  assert.equal(metaKonflikt(andere, null, { page_id: "222", form_ids: [] }), null);
+  assert.equal(metaKonflikt(andere, "a", { page_id: "111", form_ids: [] }), null);
+  // beide leer
+  assert.equal(metaKonflikt([{ id: "b", company_id: "c3", aktiv: true, config: { page_id: "444", form_ids: [] } }], null, { page_id: "444", form_ids: [] })?.id, "b");
 });
 test("Token-Variable nur mit Präfix", () => {
   assert.equal(metaConfig({ page_id: "111", token_env: "SUPABASE_SERVICE_ROLE_KEY" }).tokenEnv, null);

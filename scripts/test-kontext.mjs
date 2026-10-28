@@ -11,6 +11,7 @@ import {
   sichererZielpfad,
   startseiteFuer,
   wirksameFirma,
+  zugangUmbauGesperrt,
 } from "../src/lib/zugriff.ts";
 
 let ok = 0;
@@ -150,6 +151,27 @@ test("next nur relativ", () => {
   assert.equal(sichererZielpfad("/\\boese.de"), "/");
   assert.equal(sichererZielpfad("/login"), "/");
   assert.equal(sichererZielpfad(undefined), "/");
+});
+test("next: Steuerzeichen, Leerraum, Backslash, Normalisierung", () => {
+  assert.equal(sichererZielpfad("/\t/boese.de"), "/");
+  assert.equal(sichererZielpfad("/\n/boese.de"), "/");
+  assert.equal(sichererZielpfad("/ /boese.de"), "/");
+  assert.equal(sichererZielpfad("/a\\b"), "/");
+  assert.equal(sichererZielpfad("/%2F/boese.de"), "/%2F/boese.de");
+  assert.equal(sichererZielpfad("/x/../login"), "/");
+  assert.equal(sichererZielpfad("/.//boese.de"), "/");
+  assert.equal(sichererZielpfad("/leads#oben", "/start"), "/leads#oben");
+  assert.equal(sichererZielpfad("javascript:alert(1)", "/start"), "/start");
+});
+test("Bestehendes Profil nicht umbauen", () => {
+  const ANDERE = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+  assert.equal(zugangUmbauGesperrt(null, { rolle: "client_owner", companyId: FIRMA }), null);
+  assert.equal(zugangUmbauGesperrt({ rolle: "sales", companyId: null }, { rolle: "client_member", companyId: FIRMA }), "team_zu_kunde");
+  assert.equal(zugangUmbauGesperrt({ rolle: "admin", companyId: null }, { rolle: "client_owner", companyId: FIRMA }), "team_zu_kunde");
+  assert.equal(zugangUmbauGesperrt({ rolle: "client_member", companyId: ANDERE }, { rolle: "client_owner", companyId: FIRMA }), "andere_firma");
+  assert.equal(zugangUmbauGesperrt({ rolle: "client_member", companyId: FIRMA }, { rolle: "client_owner", companyId: FIRMA }), null);
+  assert.equal(zugangUmbauGesperrt({ rolle: "client_member", companyId: null }, { rolle: "client_owner", companyId: FIRMA }), null);
+  assert.equal(zugangUmbauGesperrt({ rolle: "sales", companyId: null }, { rolle: "fulfillment", companyId: null }), null);
 });
 test("Wer darf welche Zugänge verwalten", () => {
   assert.equal(darfZugangVerwalten("admin", "admin"), true);

@@ -56,6 +56,7 @@ export default async function ClientDashboardPage({
       .from("leads")
       .select("status, created_at, first_contact_at, angebotswert, auftragswert, lead_activities(neu_status)")
       .eq("company_id", ctx.companyId)
+      .eq("ist_test", false)
       .gte("created_at", von.toISOString())
       .lte("created_at", bis.toISOString())
       .eq("lead_activities.typ", "status_wechsel"),

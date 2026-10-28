@@ -81,6 +81,8 @@ alter table public.leads add column if not exists utm            jsonb not null 
 alter table public.leads add column if not exists anzeigengruppe text;
 alter table public.leads add column if not exists formular       text;
 alter table public.leads add column if not exists kampagne_id    text;
+-- Testleads (Knopf „Testlead senden“, is_test der Lead-Systeme) zählen in keiner Kennzahl
+alter table public.leads add column if not exists ist_test       boolean not null default false;
 
 create index if not exists leads_quelle_id_idx on public.leads(quelle_id);
 
@@ -127,17 +129,9 @@ create policy "benachrichtigungen_select_company"
     and (user_id is null or user_id = auth.uid())
   );
 
+-- Kein Update für Kunden: „gelesen“ setzt die Server-Aktion (Service-Rolle, ohne Impersonation).
+-- Eine Update-Policy erlaubte sonst, titel/text/link per PostgREST zu überschreiben.
 drop policy if exists "benachrichtigungen_update_company" on public.benachrichtigungen;
-create policy "benachrichtigungen_update_company"
-  on public.benachrichtigungen for update
-  using (
-    company_id = public.eigene_company_id()
-    and (user_id is null or user_id = auth.uid())
-  )
-  with check (
-    company_id = public.eigene_company_id()
-    and (user_id is null or user_id = auth.uid())
-  );
 
 drop policy if exists "benachrichtigungen_staff" on public.benachrichtigungen;
 create policy "benachrichtigungen_staff"

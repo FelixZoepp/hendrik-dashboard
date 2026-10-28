@@ -11,7 +11,7 @@
 --   Der Trigger erfasst jeden Weg (Portal, Team, SQL-Konsole, künftige Webhooks) — die Action
 --   nur ihren eigenen. Problem bisher: Die Portal-Actions laufen über den Service-Client,
 --   dort ist auth.uid() null → „wer“ fehlte. Lösung: Die Action setzt im selben UPDATE
---   leads.geaendert_von = <Profil-ID>; der Trigger liest coalesce(auth.uid(), geaendert_von)
+--   leads.geaendert_von = <Profil-ID>; der Trigger nimmt geaendert_von nur, wenn auth.uid() null ist
 --   und leert die Spalte danach wieder (BEFORE-Trigger), damit sie nie veraltet an einer
 --   späteren Änderung (z. B. SQL-Konsole) hängt. Die Action schreibt selbst KEINEN
 --   status_wechsel-Eintrag mehr.
@@ -73,7 +73,8 @@ begin
     insert into public.lead_activities (lead_id, user_id, typ, alt_status, neu_status, inhalt)
     values (
       new.id,
-      coalesce(auth.uid(), new.geaendert_von),
+      -- geaendert_von nur ohne JWT (Service-Rolle); mit Anmeldung zählt immer auth.uid()
+      case when auth.uid() is null then new.geaendert_von else auth.uid() end,
       'status_wechsel',
       old.status,
       new.status,

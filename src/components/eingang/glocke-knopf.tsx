@@ -75,7 +75,7 @@ export function GlockeKnopf({ meldungen, nurAnsehen }: { meldungen: Meldung[]; n
               );
               return (
                 <li key={m.id}>
-                  {m.link ? (
+                  {m.link && m.link.startsWith("/") && !m.link.startsWith("//") && !m.link.startsWith("/\\") ? (
                     <Link
                       href={m.link}
                       onClick={() => {

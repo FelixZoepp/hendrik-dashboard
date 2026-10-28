@@ -119,6 +119,8 @@ export interface Lead {
   anzeigengruppe: string | null;
   formular: string | null;
   kampagne_id: string | null;
+  /** Testlead (00014) – zählt in keiner Kennzahl */
+  ist_test: boolean;
 }
 
 export interface LeadActivity {

@@ -98,26 +98,20 @@ alter table public.lesson_tasks enable row level security;
 alter table public.lesson_task_progress enable row level security;
 alter table public.masterclass_freischaltungen enable row level security;
 
--- Entwürfe nur fürs Team sichtbar
+-- Inhalte nur fürs Team lesbar. Kunden lesen ausschließlich über den Server (Service-Rolle),
+-- der Freischaltung je Firma + Veröffentlichung prüft — eine Kunden-Lese-Policy würde die
+-- Freischaltung umgehen (direkter PostgREST-Zugriff mit Kunden-JWT).
 drop policy if exists "courses_select" on public.courses;
 create policy "courses_select" on public.courses for select
-  using ((status = 'veroeffentlicht' and auth.uid() is not null) or public.is_staff());
+  using (public.is_staff());
 
 drop policy if exists "lessons_select" on public.lessons;
 create policy "lessons_select" on public.lessons for select
-  using (
-    (status = 'veroeffentlicht' and auth.uid() is not null
-      and exists (select 1 from public.courses c where c.id = course_id and c.status = 'veroeffentlicht'))
-    or public.is_staff()
-  );
+  using (public.is_staff());
 
 drop policy if exists "lesson_tasks_select" on public.lesson_tasks;
 create policy "lesson_tasks_select" on public.lesson_tasks for select
-  using (
-    public.is_staff()
-    or (auth.uid() is not null and exists (
-      select 1 from public.lessons l where l.id = lesson_id and l.status = 'veroeffentlicht'))
-  );
+  using (public.is_staff());
 drop policy if exists "lesson_tasks_staff" on public.lesson_tasks;
 create policy "lesson_tasks_staff" on public.lesson_tasks for all
   using (public.is_staff()) with check (public.is_staff());
