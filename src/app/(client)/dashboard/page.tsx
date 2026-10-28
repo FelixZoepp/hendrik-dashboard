@@ -16,6 +16,7 @@ import {
   zeitraumGrenzen,
   type KennzahlLead,
 } from "@/lib/crm/logik";
+import { KampagnenKarte } from "@/components/kampagne/kampagnen-karte";
 import { HeuteAnrufenZeile, type AnrufZeile } from "./heute-anrufen";
 import type { LeadStatus } from "@/lib/types/database";
 
@@ -161,8 +162,7 @@ export default async function ClientDashboardPage({
         </p>
       </section>
 
-      {/* P4: Kampagnen-Karte */}
-      {/* Steckplatz für ROI/Werbebudget: <KampagnenKarte companyId={ctx.companyId} von={von} bis={bis} /> */}
+      <KampagnenKarte companyId={ctx.companyId} von={von} bis={bis} />
     </div>
   );
 }

@@ -71,7 +71,7 @@ export const KUNDEN_NAV: NavGroup[] = [
     label: "Aufträge",
     items: [
       { label: "Start", href: "/dashboard", icon: LayoutDashboard, roles: KUNDE },
-      { label: "Leads", href: "/leads", icon: ClipboardList, roles: KUNDE },
+      { label: "Anfragen", href: "/leads", icon: ClipboardList, roles: KUNDE },
     ],
   },
   {
