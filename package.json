@@ -11,7 +11,8 @@
     "test:gespraeche": "node --no-warnings scripts/test-gespraeche.mjs",
     "test:verlustgrund": "node --no-warnings scripts/test-verlustgrund.mjs",
     "test:funnel": "node --no-warnings scripts/test-funnel.mjs",
-    "test:kontext": "node --no-warnings scripts/test-kontext.mjs"
+    "test:kontext": "node --no-warnings scripts/test-kontext.mjs",
+    "test:kampagne": "node --no-warnings scripts/test-kampagne.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

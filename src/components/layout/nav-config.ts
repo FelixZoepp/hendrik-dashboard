@@ -77,6 +77,7 @@ export const KUNDEN_NAV: NavGroup[] = [
   {
     label: "Wachstum",
     items: [
+      { label: "Kampagne", href: "/kampagne", icon: Megaphone, roles: KUNDE },
       { label: "Masterclass", href: "/akademie", icon: GraduationCap, roles: KUNDE },
       { label: "Downloads", href: "/downloads", icon: Download, roles: KUNDE },
     ],
