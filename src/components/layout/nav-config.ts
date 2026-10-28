@@ -57,6 +57,7 @@ export const TEAM_NAV: NavGroup[] = [
     label: "Allgemein",
     items: [
       { label: "SOPs", href: "/sops", icon: BookOpen, roles: TEAM },
+      { label: "Masterclass-Editor", href: "/inhalte/masterclass", icon: GraduationCap, roles: TEAM },
       { label: "Reaktionszeiten", href: "/sla", icon: Timer, roles: ["admin"] },
     ],
   },
