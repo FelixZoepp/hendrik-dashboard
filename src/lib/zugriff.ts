@@ -45,6 +45,7 @@ export const KUNDEN_PRAEFIXE: readonly string[] = [
   "/akademie",
   "/downloads",
   "/kampagne",
+  "/auswertung",
 ];
 
 /** Team-Seiten, die nur bestimmte Team-Rollen sehen dürfen. */

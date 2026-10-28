@@ -79,7 +79,8 @@ export function statusHinweis(status: LeadStatus): string | null {
 }
 
 /** Welche Angabe braucht der Wechsel in diese Stufe? */
-export function brauchtAngabe(stufe: Stufe): "angebotswert" | "auftragswert" | "verlustgrund" | null {
+export function brauchtAngabe(stufe: Stufe): "termin" | "angebotswert" | "auftragswert" | "verlustgrund" | null {
+  if (stufe === "termin") return "termin";
   if (stufe === "angebot") return "angebotswert";
   if (stufe === "auftrag") return "auftragswert";
   if (stufe === "verloren") return "verlustgrund";
@@ -110,6 +111,9 @@ export interface StufenWechselEingabe {
   auftragswert?: number | null;
   verlust_grund?: VerlustGrund | null;
   verlust_notiz?: string | null;
+  /** Termin vor Ort: Beginn (ISO, Berliner Zeit gewählt); leer = Datum steht noch nicht fest */
+  termin_beginn?: string | null;
+  termin_art?: "vor_ort" | "telefon" | "video";
 }
 
 /** Prüft die Pflichtangaben eines Stufenwechsels. null = in Ordnung, sonst Fehlertext. */
@@ -121,6 +125,9 @@ export function pruefeStufenWechsel(e: StufenWechselEingabe): string | null {
   }
   if (e.stufe === "angebot" && e.angebotswert != null) {
     if (!Number.isFinite(e.angebotswert) || e.angebotswert < 0) return "Der Angebotswert stimmt nicht.";
+  }
+  if (e.stufe === "termin" && e.termin_beginn != null) {
+    if (!Number.isFinite(new Date(e.termin_beginn).getTime())) return "Bitte Datum und Uhrzeit wählen.";
   }
   if (e.stufe === "verloren") {
     if (!e.verlust_grund || !VERLUST_GRUENDE.some((g) => g.value === e.verlust_grund)) {

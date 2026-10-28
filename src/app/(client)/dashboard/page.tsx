@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarClock, PartyPopper } from "lucide-react";
+import { BarChart3, CalendarClock, CalendarX, PartyPopper } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireKunde } from "@/lib/kontext";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,10 @@ import {
 } from "@/lib/crm/logik";
 import { KampagnenKarte } from "@/components/kampagne/kampagnen-karte";
 import { HeuteAnrufenZeile, type AnrufZeile } from "./heute-anrufen";
+import { TerminRueckmeldung } from "@/components/auswertung/termin-karten";
+import { AnrufenKnopf } from "@/components/crm/kontakt-knoepfe";
+import { ladeTerminAufgaben } from "@/lib/auswertung/daten";
+import { zeitpunktText } from "@/lib/crm/logik";
 import type { LeadStatus } from "@/lib/types/database";
 
 export const metadata: Metadata = {
@@ -43,7 +47,7 @@ export default async function ClientDashboardPage({
   const { von, bis } = zeitraumGrenzen(zeitraum, jetzt);
   const db = createAdminClient();
 
-  const [anrufRes, kennRes] = await Promise.all([
+  const [anrufRes, kennRes, aufgaben] = await Promise.all([
     db
       .from("leads")
       .select("id, vorname, nachname, ort, anliegen, telefon, status, created_at, first_contact_at, naechste_aktion_am, kontakt_versuche")
@@ -59,6 +63,7 @@ export default async function ClientDashboardPage({
       .gte("created_at", von.toISOString())
       .lte("created_at", bis.toISOString())
       .eq("lead_activities.typ", "status_wechsel"),
+    ladeTerminAufgaben(db, ctx.companyId, jetzt),
   ]);
 
   const anrufe = heuteAnrufen((anrufRes.data ?? []) as AnrufZeile[], jetzt);
@@ -127,6 +132,49 @@ export default async function ClientDashboardPage({
         )}
       </section>
 
+      {/* Wie war der Termin? */}
+      {aufgaben.wartend.length > 0 && (
+        <section className="fern-card space-y-3 p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xl font-bold">Wie war der Termin?</h2>
+            <span className="rounded-full bg-amber-500 px-3 py-1 text-sm font-bold text-white">{aufgaben.wartend.length}</span>
+          </div>
+          <div className="space-y-3">
+            {aufgaben.wartend.slice(0, 5).map((t) => (
+              <TerminRueckmeldung
+                key={t.terminId}
+                titel={t.name}
+                termin={{ id: t.terminId, lead_id: t.leadId, beginn: t.beginn, art: t.art }}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* No-Show zurückholen */}
+      {aufgaben.noShows.length > 0 && (
+        <section className="fern-card space-y-3 p-5" id="no-shows">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-xl font-bold">No-Show zurückholen</h2>
+            <span className="rounded-full bg-sla-rot px-3 py-1 text-sm font-bold text-white">{aufgaben.noShows.length}</span>
+          </div>
+          <p className="text-sm text-muted-foreground">Nicht zum Termin erschienen – kurz anrufen und neuen Termin machen.</p>
+          <ul className="divide-y">
+            {aufgaben.noShows.slice(0, 10).map((t) => (
+              <li key={t.terminId} className="flex items-center gap-3 py-3">
+                <Link href={`/leads/${t.leadId}`} className="min-w-0 flex-1">
+                  <p className="truncate text-base font-semibold">{t.name}</p>
+                  <p className="flex items-center gap-1 text-sm text-sla-rot" suppressHydrationWarning>
+                    <CalendarX className="size-3.5" /> Termin {zeitpunktText(t.beginn)} verpasst
+                  </p>
+                </Link>
+                <AnrufenKnopf leadId={t.leadId} telefon={t.telefon} zumLead className="h-12 px-5" />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Kennzahlen */}
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -156,10 +204,15 @@ export default async function ClientDashboardPage({
             </div>
           ))}
         </div>
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <CalendarClock className="size-3.5" />
-          Gezählt werden Anfragen, die im gewählten Zeitraum eingegangen sind.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <CalendarClock className="size-3.5" />
+            Gezählt werden Anfragen, die im gewählten Zeitraum eingegangen sind.
+          </p>
+          <Link href={`/auswertung?zeitraum=${zeitraum}`} className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+            <BarChart3 className="size-4" /> Ganze Auswertung ansehen →
+          </Link>
+        </div>
       </section>
 
       <KampagnenKarte companyId={ctx.companyId} von={von} bis={bis} />

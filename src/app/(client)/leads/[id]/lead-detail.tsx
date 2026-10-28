@@ -16,7 +16,10 @@ import {
   MessageCircle,
   Phone,
   PhoneMissed,
+  PhoneOff,
+  PhoneForwarded,
   Send,
+  Voicemail,
   User,
   X,
 } from "lucide-react";
@@ -39,7 +42,9 @@ import { AlterAmpel } from "@/components/crm/alter-ampel";
 import { AnrufenKnopf, WhatsAppKnopf } from "@/components/crm/kontakt-knoepfe";
 import { RueckrufWahl } from "@/components/crm/rueckruf-wahl";
 import { useStufenWechsel } from "@/components/crm/stufen-wechsel";
-import { addLeadActivity, erreicht, nichtErreicht, rueckrufSetzen, zustaendigSetzen } from "../actions";
+import { TermineBereich, type TerminZeile } from "@/components/auswertung/termin-karten";
+import type { AnrufErgebnis } from "@/lib/auswertung/logik";
+import { addLeadActivity, anrufErgebnis, nichtErreicht, rueckrufSetzen, zustaendigSetzen } from "../actions";
 import type { Lead, LeadActivity, LeadActivityTyp } from "@/lib/types/database";
 
 interface LeadDetailProps {
@@ -50,7 +55,16 @@ interface LeadDetailProps {
   firmenName: string;
   /** Nach „Anrufen“ von Karte/Start: gleich nach dem Ergebnis fragen */
   anrufFrage?: boolean;
+  termine: TerminZeile[];
+  jetztIso: string;
 }
+
+const NICHT_ERREICHT_KNOEPFE: { wert: AnrufErgebnis; label: string; icon: typeof Phone; erfolg: string }[] = [
+  { wert: "nicht_erreicht", label: "Nicht erreicht", icon: PhoneMissed, erfolg: "Versuch gezählt" },
+  { wert: "mailbox", label: "Mailbox", icon: Voicemail, erfolg: "Mailbox vermerkt" },
+  { wert: "rueckruf_gewuenscht", label: "Rückruf gewünscht", icon: PhoneForwarded, erfolg: "Erreicht – Rückruf gewünscht" },
+  { wert: "falsche_nummer", label: "Falsche Nummer", icon: PhoneOff, erfolg: "Falsche Nummer vermerkt" },
+];
 
 function Bereich({ titel, children, className }: { titel: string; children: React.ReactNode; className?: string }) {
   return (
@@ -61,11 +75,11 @@ function Bereich({ titel, children, className }: { titel: string; children: Reac
   );
 }
 
-export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, anrufFrage }: LeadDetailProps) {
+export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, anrufFrage, termine, jetztIso }: LeadDetailProps) {
   const router = useRouter();
   const stufe = stufenInfo(stufeVon(lead.status));
   const { starte, dialog, laeuft: stufeLaeuft } = useStufenWechsel();
-  const [frage, setFrage] = useState<"ergebnis" | "rueckruf" | null>(anrufFrage ? "ergebnis" : null);
+  const [frage, setFrage] = useState<"ergebnis" | "rueckruf" | "rueckruf_gewuenscht" | null>(anrufFrage ? "ergebnis" : null);
   const [laeuft, setLaeuft] = useState(false);
   const [rueckrufModus, setRueckrufModus] = useState<"planen" | "nicht_erreicht" | null>(null);
   const [notiz, setNotiz] = useState("");
@@ -144,20 +158,33 @@ export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, an
           {frage === "ergebnis" ? (
             <>
               <p className="text-lg font-bold">Wie lief der Anruf?</p>
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  size="lg"
-                  className="h-14 rounded-2xl text-base"
-                  disabled={laeuft}
-                  onClick={async () => {
-                    if (await ausfuehren(() => erreicht(lead.id), "Super – als erreicht vermerkt")) setFrage(null);
-                  }}
-                >
-                  <Check className="size-5" /> Erreicht
-                </Button>
-                <Button size="lg" variant="outline" className="h-14 rounded-2xl text-base" disabled={laeuft} onClick={() => setFrage("rueckruf")}>
-                  <PhoneMissed className="size-5" /> Nicht erreicht
-                </Button>
+              <Button
+                size="lg"
+                className="h-14 w-full rounded-2xl text-base"
+                disabled={laeuft}
+                onClick={async () => {
+                  if (await ausfuehren(() => anrufErgebnis(lead.id, "erreicht"), "Super – als erreicht vermerkt")) setFrage(null);
+                }}
+              >
+                <Check className="size-5" /> Erreicht
+              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                {NICHT_ERREICHT_KNOEPFE.map((k) => (
+                  <Button
+                    key={k.wert}
+                    size="lg"
+                    variant="outline"
+                    className="h-12 rounded-2xl text-sm"
+                    disabled={laeuft}
+                    onClick={async () => {
+                      // 1 Tipp speichert den Versuch – der Rückruf danach ist freiwillig
+                      if (!(await ausfuehren(() => anrufErgebnis(lead.id, k.wert), k.erfolg))) return;
+                      setFrage(k.wert === "falsche_nummer" ? null : k.wert === "rueckruf_gewuenscht" ? "rueckruf_gewuenscht" : "rueckruf");
+                    }}
+                  >
+                    <k.icon className="size-4" /> {k.label}
+                  </Button>
+                ))}
               </div>
               <button type="button" className="text-sm text-muted-foreground underline" onClick={() => setFrage(null)}>
                 Später eintragen
@@ -165,21 +192,17 @@ export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, an
             </>
           ) : (
             <>
-              <p className="text-lg font-bold">Nicht erreicht – wann nochmal anrufen?</p>
+              <p className="text-lg font-bold">
+                {frage === "rueckruf_gewuenscht" ? "Wann sollst du zurückrufen?" : "Wann nochmal anrufen?"}
+              </p>
               <RueckrufWahl
                 disabled={laeuft}
                 onWahl={async (iso) => {
-                  if (await ausfuehren(() => nichtErreicht(lead.id, iso), `Rückruf ${rueckrufText(iso)} geplant`)) setFrage(null);
+                  if (await ausfuehren(() => rueckrufSetzen(lead.id, iso), `Rückruf ${rueckrufText(iso)} geplant`)) setFrage(null);
                 }}
               />
-              <Button
-                variant="ghost"
-                disabled={laeuft}
-                onClick={async () => {
-                  if (await ausfuehren(() => nichtErreicht(lead.id), "Versuch gezählt")) setFrage(null);
-                }}
-              >
-                Ohne Rückruf speichern
+              <Button variant="ghost" disabled={laeuft} onClick={() => setFrage(null)}>
+                Ohne Rückruf
               </Button>
             </>
           )}
@@ -233,6 +256,11 @@ export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, an
             )}
           </dl>
         )}
+      </Bereich>
+
+      {/* Termine (Show / No-Show / Neuvereinbarung) */}
+      <Bereich titel="Termine">
+        <TermineBereich leadId={lead.id} termine={termine} abgeschlossen={stufe.abschluss} jetztIso={jetztIso} />
       </Bereich>
 
       {/* Rückruf + Nicht erreicht */}

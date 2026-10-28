@@ -132,6 +132,35 @@ export interface LeadActivity {
   created_at: string;
 }
 
+// Sales-Auswertung (Migration 00018)
+export interface LeadAnruf {
+  id: string;
+  lead_id: string;
+  company_id: string;
+  user_id: string | null;
+  am: string;
+  kanal: "anruf" | "whatsapp";
+  ergebnis: "erreicht" | "nicht_erreicht" | "mailbox" | "falsche_nummer" | "rueckruf_gewuenscht" | null;
+  dauer_s: number | null;
+  notiz: string | null;
+  created_at: string;
+}
+
+export interface LeadTermin {
+  id: string;
+  lead_id: string;
+  company_id: string;
+  art: "vor_ort" | "telefon" | "video";
+  beginn: string;
+  status: "geplant" | "stattgefunden" | "nicht_erschienen" | "abgesagt" | "verschoben";
+  ersetzt_termin_id: string | null;
+  notiz: string | null;
+  ergebnis_am: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+}
+
 export interface LeadSla {
   id: string;
   company_id: string;
