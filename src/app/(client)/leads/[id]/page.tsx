@@ -1,76 +1,74 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireKunde } from "@/lib/kontext";
+import { istUuid } from "@/lib/zugriff";
 import { LeadDetail } from "./lead-detail";
-import type { Lead, LeadActivity, Profile } from "@/lib/types/database";
-import type { Metadata } from "next";
+import type { Lead, LeadActivity } from "@/lib/types/database";
 
 export const dynamic = "force-dynamic";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const { companyId } = await requireKunde();
-  const supabase = createAdminClient();
-  const { data } = await supabase
+  if (!istUuid(id)) return { title: "Anfrage" };
+  const { data } = await createAdminClient()
     .from("leads")
     .select("vorname, nachname")
     .eq("id", id)
     .eq("company_id", companyId)
     .maybeSingle();
-
-  return {
-    title: data ? `${data.vorname} ${data.nachname}` : "Lead",
-  };
+  return { title: data ? `${data.vorname} ${data.nachname}`.trim() || "Anfrage" : "Anfrage" };
 }
 
 export default async function LeadDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
-  const { companyId } = await requireKunde();
-  const supabase = createAdminClient();
+  const sp = await searchParams;
+  const ctx = await requireKunde();
+  if (!istUuid(id)) notFound();
+  const db = createAdminClient();
 
-  const { data: leadRow } = await supabase
-    .from("leads")
-    .select("*")
-    .eq("id", id)
-    .eq("company_id", companyId)
-    .maybeSingle();
-
-  if (!leadRow) {
-    notFound();
-  }
-
+  const { data: leadRow } = await db.from("leads").select("*").eq("id", id).eq("company_id", ctx.companyId).maybeSingle();
+  if (!leadRow) notFound();
   const lead = leadRow as Lead;
-  const activitiesResult = await supabase
-    .from("lead_activities")
-    .select("*")
-    .eq("lead_id", lead.id)
-    .order("created_at", { ascending: false });
 
-  // Resolve assignee name
-  let assigneeName: string | null = null;
-  if (lead.assigned_to) {
-    const { data: assignee } = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", lead.assigned_to)
-      .single();
-    assigneeName = (assignee as Pick<Profile, "full_name"> | null)?.full_name ?? null;
+  // Kind-Tabelle erst nach Prüfung des Elternteils (Lead gehört zur Firma)
+  const [aktRes, personenRes] = await Promise.all([
+    db.from("lead_activities").select("*").eq("lead_id", lead.id).order("created_at", { ascending: false }),
+    db.from("profiles").select("id, full_name").eq("company_id", ctx.companyId).eq("active", true).order("full_name"),
+  ]);
+  const aktivitaeten = (aktRes.data as LeadActivity[]) ?? [];
+  const personen = ((personenRes.data ?? []) as { id: string; full_name: string | null }[]).map((p) => ({
+    id: p.id,
+    name: p.full_name || "Ohne Namen",
+  }));
+
+  // Namen im Verlauf (auch Team-Mitglieder, die über „Als Kunde ansehen“ gearbeitet haben)
+  const namen: Record<string, string> = Object.fromEntries(personen.map((p) => [p.id, p.name]));
+  const fehlend = [...new Set(aktivitaeten.map((a) => a.user_id).filter((u): u is string => !!u && !namen[u]))];
+  if (lead.assigned_to && !namen[lead.assigned_to]) fehlend.push(lead.assigned_to);
+  if (fehlend.length > 0) {
+    const { data } = await db.from("profiles").select("id, full_name, company_id, role").in("id", fehlend);
+    for (const p of (data ?? []) as { id: string; full_name: string | null; company_id: string | null; role: string }[]) {
+      const istTeam = ["admin", "sales", "fulfillment"].includes(p.role);
+      namen[p.id] = istTeam ? "Hoffmann Solutions" : p.full_name || "Ohne Namen";
+    }
   }
 
   return (
     <LeadDetail
       lead={lead}
-      activities={(activitiesResult.data as LeadActivity[]) ?? []}
-      assigneeName={assigneeName}
-      isStaff={false}
+      aktivitaeten={aktivitaeten}
+      personen={personen}
+      namen={namen}
+      firmenName={ctx.company.name}
+      anrufFrage={sp.anruf === "1"}
     />
   );
 }

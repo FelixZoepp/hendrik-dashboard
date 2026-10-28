@@ -1,326 +1,473 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { SlaBadge } from "@/components/leads/sla-badge";
-import { StatusSelect } from "@/components/leads/status-select";
-import { ActivityFeed } from "@/components/leads/activity-feed";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
-import { LEAD_STATUS_CONFIG, LEAD_QUELLEN, formatCurrency } from "@/lib/lead-utils";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
-  Phone,
+  ArrowLeft,
+  ArrowRightLeft,
+  CalendarClock,
+  Check,
+  ChevronDown,
+  FileText,
   Mail,
   MapPin,
   MessageCircle,
-  ArrowLeft,
-  HandMetal,
-  CalendarClock,
+  Phone,
+  PhoneMissed,
+  Send,
   User,
+  X,
 } from "lucide-react";
-import { toast } from "sonner";
-import { updateLeadStatus, markAsContacted, addLeadActivity, updateLeadDetails } from "../actions";
-import type { Lead, LeadActivity, LeadStatus, VerlustGrund, LeadActivityTyp } from "@/lib/types/database";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { formatCurrency, quelleLabel } from "@/lib/lead-utils";
+import {
+  STUFEN,
+  alterText,
+  rueckrufText,
+  statusHinweis,
+  stufeVon,
+  stufenInfo,
+  telLink,
+  verlustGrundLabel,
+  zeitpunktText,
+} from "@/lib/crm/logik";
+import { AlterAmpel } from "@/components/crm/alter-ampel";
+import { AnrufenKnopf, WhatsAppKnopf } from "@/components/crm/kontakt-knoepfe";
+import { RueckrufWahl } from "@/components/crm/rueckruf-wahl";
+import { useStufenWechsel } from "@/components/crm/stufen-wechsel";
+import { addLeadActivity, erreicht, nichtErreicht, rueckrufSetzen, zustaendigSetzen } from "../actions";
+import type { Lead, LeadActivity, LeadActivityTyp } from "@/lib/types/database";
 
 interface LeadDetailProps {
   lead: Lead;
-  activities: LeadActivity[];
-  assigneeName?: string | null;
-  isStaff?: boolean;
+  aktivitaeten: LeadActivity[];
+  personen: { id: string; name: string }[];
+  namen: Record<string, string>;
+  firmenName: string;
+  /** Nach „Anrufen“ von Karte/Start: gleich nach dem Ergebnis fragen */
+  anrufFrage?: boolean;
 }
 
-export function LeadDetail({ lead, activities, assigneeName, isStaff }: LeadDetailProps) {
-  const router = useRouter();
-  const quelleLabel =
-    LEAD_QUELLEN.find((q) => q.value === lead.quelle)?.label ?? lead.quelle;
-  const showContactButton =
-    lead.status === "neu" && !lead.first_contact_at;
-
-  // Wiedervorlage date state
-  const [wiedervorlageDate, setWiedervorlageDate] = useState(
-    lead.naechste_aktion_am
-      ? new Date(lead.naechste_aktion_am).toISOString().split("T")[0]
-      : ""
+function Bereich({ titel, children, className }: { titel: string; children: React.ReactNode; className?: string }) {
+  return (
+    <section className={cn("fern-card space-y-3 p-5", className)}>
+      <h2 className="text-base font-bold">{titel}</h2>
+      {children}
+    </section>
   );
-  const [savingWiedervorlage, setSavingWiedervorlage] = useState(false);
+}
 
-  async function handleStatusChange(data: {
-    status: LeadStatus;
-    auftragswert?: number;
-    verlust_grund?: VerlustGrund;
-  }) {
-    const result = await updateLeadStatus(lead.id, data);
-    if (result?.error) {
-      throw new Error(result.error);
-    }
-    router.refresh();
-  }
+export function LeadDetail({ lead, aktivitaeten, personen, namen, firmenName, anrufFrage }: LeadDetailProps) {
+  const router = useRouter();
+  const stufe = stufenInfo(stufeVon(lead.status));
+  const { starte, dialog, laeuft: stufeLaeuft } = useStufenWechsel();
+  const [frage, setFrage] = useState<"ergebnis" | "rueckruf" | null>(anrufFrage ? "ergebnis" : null);
+  const [laeuft, setLaeuft] = useState(false);
+  const [rueckrufModus, setRueckrufModus] = useState<"planen" | "nicht_erreicht" | null>(null);
+  const [notiz, setNotiz] = useState("");
 
-  async function handleMarkContacted() {
-    const result = await markAsContacted(lead.id);
-    if (result?.error) {
-      toast.error(result.error);
-      return;
-    }
-    toast.success("Als kontaktiert markiert — SLA-Uhr gestoppt");
-    router.refresh();
-  }
-
-  async function handleAddActivity(data: {
-    typ: LeadActivityTyp;
-    inhalt: string;
-  }) {
-    const result = await addLeadActivity(lead.id, data);
-    if (result?.error) {
-      throw new Error(result.error);
-    }
-    router.refresh();
-  }
-
-  async function handleWiedervorlageChange(dateStr: string) {
-    setWiedervorlageDate(dateStr);
-    if (!dateStr) return;
-
-    setSavingWiedervorlage(true);
+  async function ausfuehren(fn: () => Promise<{ error: string | null }>, erfolg: string) {
+    setLaeuft(true);
     try {
-      const isoDate = new Date(dateStr + "T09:00:00").toISOString();
-      const result = await updateLeadDetails(lead.id, {
-        naechste_aktion_am: isoDate,
-      });
-      if (result?.error) {
-        toast.error(result.error);
-      } else {
-        toast.success("Wiedervorlage gesetzt");
-        router.refresh();
+      const res = await fn();
+      if (res.error) {
+        toast.error(res.error);
+        return false;
       }
+      toast.success(erfolg);
+      router.refresh();
+      return true;
     } catch {
-      toast.error("Wiedervorlage konnte nicht gespeichert werden");
+      toast.error("Hat nicht geklappt. Bitte nochmal versuchen.");
+      return false;
+    } finally {
+      setLaeuft(false);
     }
-    setSavingWiedervorlage(false);
   }
+
+  const versuche = lead.kontakt_versuche ?? 0;
+  const antworten = Array.isArray(lead.antworten) ? lead.antworten.filter((a) => a && (a.frage || a.antwort)) : [];
+  const utm = lead.utm && typeof lead.utm === "object" ? Object.entries(lead.utm).filter(([, v]) => v) : [];
+  const herkunft = [
+    { label: "Formular", wert: lead.formular },
+    { label: "Kampagne", wert: lead.campaign },
+    { label: "Anzeigengruppe", wert: lead.anzeigengruppe },
+  ].filter((h) => h.wert);
+  const tel = telLink(lead.telefon);
+  const grund = verlustGrundLabel(lead.verlust_grund);
+  const hinweis = statusHinweis(lead.status);
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      {/* Zurück */}
-      <Link
-        href="/leads"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        Zurück zu allen Leads
+    <div className="mx-auto max-w-3xl space-y-4 pb-10">
+      <Link href="/leads" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-4" />
+        Alle Anfragen
       </Link>
 
       {/* Kopf */}
-      <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="fern-page-title">
-              {lead.vorname} {lead.nachname}
-            </h1>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              {lead.ort && (
-                <span className="flex items-center gap-1">
-                  <MapPin className="h-3.5 w-3.5" />
-                  {lead.plz && `${lead.plz} `}
-                  {lead.ort}
-                </span>
-              )}
-              <span>·</span>
-              <span>{quelleLabel}</span>
-              {lead.campaign && (
-                <>
-                  <span>·</span>
-                  <span>{lead.campaign}</span>
-                </>
-              )}
-            </div>
-          </div>
-          <SlaBadge
-            createdAt={lead.created_at}
-            firstContactAt={lead.first_contact_at}
-            className="text-sm px-3 py-1"
-          />
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="fern-page-title">
+            {lead.vorname} {lead.nachname}
+          </h1>
+          <span className={cn("rounded-md px-2 py-0.5 text-sm font-semibold", stufe.farbe)}>{stufe.label}</span>
         </div>
-
-        {/* Kontakt-Buttons */}
-        <div className="flex flex-wrap gap-2">
-          {lead.telefon && (
-            <Button
-              variant="outline"
-              size="sm"
-              render={<a href={`tel:${lead.telefon}`} />}
-            >
-              <Phone className="mr-1.5 h-3.5 w-3.5" />
-              {lead.telefon}
-            </Button>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          {(lead.ort || lead.plz) && (
+            <span className="inline-flex items-center gap-1">
+              <MapPin className="size-3.5" />
+              {[lead.plz, lead.ort].filter(Boolean).join(" ")}
+            </span>
           )}
-          {lead.telefon && (
-            <Button
-              variant="outline"
-              size="sm"
-              render={
-                <a
-                  href={`https://wa.me/${lead.telefon.replace(/[^0-9+]/g, "")}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                />
-              }
-            >
-              <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
-              WhatsApp
-            </Button>
-          )}
-          {lead.email && (
-            <Button
-              variant="outline"
-              size="sm"
-              render={<a href={`mailto:${lead.email}`} />}
-            >
-              <Mail className="mr-1.5 h-3.5 w-3.5" />
-              {lead.email}
-            </Button>
-          )}
+          <AlterAmpel lead={lead} className="text-sm" />
+          <span>{quelleLabel(lead.quelle)}</span>
         </div>
-
-        {/* Kontaktiert-Button */}
-        {showContactButton && (
-          <Button
-            onClick={handleMarkContacted}
-            className="w-full sm:w-auto bg-signal text-signal-foreground hover:bg-signal/90"
-            size="lg"
-          >
-            <HandMetal className="mr-2 h-4 w-4" />
-            Als kontaktiert markieren
-          </Button>
-        )}
       </div>
 
-      <Separator />
+      {/* Große Kontakt-Knöpfe */}
+      {lead.telefon ? (
+        <div className="flex gap-3">
+          <AnrufenKnopf leadId={lead.id} telefon={lead.telefon} groesse="gross" nachher={() => setFrage("ergebnis")} />
+          <WhatsAppKnopf leadId={lead.id} telefon={lead.telefon} firmenName={firmenName} vorname={lead.vorname} groesse="gross" />
+        </div>
+      ) : (
+        <p className="rounded-2xl bg-muted p-4 text-sm text-muted-foreground">Keine Telefonnummer hinterlegt.</p>
+      )}
 
-      {/* Status + Details */}
-      <div className="grid gap-6 sm:grid-cols-2">
-        <div className="space-y-4">
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5">Status</p>
-            <StatusSelect
-              currentStatus={lead.status}
-              onStatusChange={handleStatusChange}
-            />
-          </div>
-
-          {lead.anliegen && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Anliegen</p>
-              <p className="text-sm">{lead.anliegen}</p>
-            </div>
-          )}
-
-          {lead.angebotswert != null && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Angebotswert</p>
-              <p className="text-sm font-mono font-medium">
-                {formatCurrency(lead.angebotswert)}
-              </p>
-            </div>
-          )}
-
-          {lead.auftragswert != null && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Auftragswert</p>
-              <p className="text-sm font-mono font-medium text-success">
-                {formatCurrency(lead.auftragswert)}
-              </p>
-            </div>
-          )}
-
-          {lead.verlust_grund && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">Verlustgrund</p>
-              <p className="text-sm">
-                {lead.verlust_grund.replace(/_/g, " ")}
-              </p>
-            </div>
+      {/* Ergebnis des Anrufs */}
+      {frage && (
+        <div className="fern-card space-y-3 border-2 border-primary/30 p-5">
+          {frage === "ergebnis" ? (
+            <>
+              <p className="text-lg font-bold">Wie lief der Anruf?</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Button
+                  size="lg"
+                  className="h-14 rounded-2xl text-base"
+                  disabled={laeuft}
+                  onClick={async () => {
+                    if (await ausfuehren(() => erreicht(lead.id), "Super – als erreicht vermerkt")) setFrage(null);
+                  }}
+                >
+                  <Check className="size-5" /> Erreicht
+                </Button>
+                <Button size="lg" variant="outline" className="h-14 rounded-2xl text-base" disabled={laeuft} onClick={() => setFrage("rueckruf")}>
+                  <PhoneMissed className="size-5" /> Nicht erreicht
+                </Button>
+              </div>
+              <button type="button" className="text-sm text-muted-foreground underline" onClick={() => setFrage(null)}>
+                Später eintragen
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-lg font-bold">Nicht erreicht – wann nochmal anrufen?</p>
+              <RueckrufWahl
+                disabled={laeuft}
+                onWahl={async (iso) => {
+                  if (await ausfuehren(() => nichtErreicht(lead.id, iso), `Rückruf ${rueckrufText(iso)} geplant`)) setFrage(null);
+                }}
+              />
+              <Button
+                variant="ghost"
+                disabled={laeuft}
+                onClick={async () => {
+                  if (await ausfuehren(() => nichtErreicht(lead.id), "Versuch gezählt")) setFrage(null);
+                }}
+              >
+                Ohne Rückruf speichern
+              </Button>
+            </>
           )}
         </div>
+      )}
 
-        <div className="space-y-4">
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">Erstellt</p>
-            <p className="text-sm font-mono">
-              {new Date(lead.created_at).toLocaleString("de-DE", {
-                timeZone: "Europe/Berlin",
-              })}
-            </p>
-          </div>
-          {lead.first_contact_at && (
-            <div>
-              <p className="text-xs text-muted-foreground mb-1">
-                Erstkontakt
-              </p>
-              <p className="text-sm font-mono">
-                {new Date(lead.first_contact_at).toLocaleString("de-DE", {
-                  timeZone: "Europe/Berlin",
-                })}
-              </p>
-            </div>
-          )}
+      {/* Stufe */}
+      <Bereich titel="Wo steht die Anfrage?">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {STUFEN.map((s) => {
+            const aktiv = s.id === stufe.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                disabled={stufeLaeuft}
+                onClick={() => void starte(lead, s.id)}
+                className={cn(
+                  "min-h-14 rounded-2xl border-2 px-3 py-2 text-base font-semibold transition disabled:opacity-60",
+                  aktiv ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card hover:border-primary/50",
+                )}
+                aria-pressed={aktiv}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        {(lead.angebotswert != null || lead.auftragswert != null || grund || hinweis) && (
+          <dl className="grid grid-cols-2 gap-3 pt-1 text-sm">
+            {lead.angebotswert != null && (
+              <div>
+                <dt className="text-muted-foreground">Angebot</dt>
+                <dd className="text-lg font-bold">{formatCurrency(lead.angebotswert)}</dd>
+              </div>
+            )}
+            {lead.auftragswert != null && stufe.id === "auftrag" && (
+              <div>
+                <dt className="text-muted-foreground">Auftrag</dt>
+                <dd className="text-lg font-bold text-success">{formatCurrency(lead.auftragswert)}</dd>
+              </div>
+            )}
+            {stufe.id === "verloren" && (grund || hinweis) && (
+              <div className="col-span-2">
+                <dt className="text-muted-foreground">Grund</dt>
+                <dd className="font-semibold">
+                  {grund ?? hinweis}
+                  {lead.verlust_notiz && <span className="font-normal"> – {lead.verlust_notiz}</span>}
+                </dd>
+              </div>
+            )}
+          </dl>
+        )}
+      </Bereich>
 
-          {/* Zugewiesen an */}
-          <div>
-            <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <User className="h-3 w-3" />
-              Zugewiesen an
-            </p>
-            <p className="text-sm">
-              {assigneeName ?? "Nicht zugewiesen"}
-            </p>
-          </div>
-
-          {/* Wiedervorlage */}
-          <div>
-            <p className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
-              <CalendarClock className="h-3 w-3" />
-              Wiedervorlage
+      {/* Rückruf + Nicht erreicht */}
+      {!stufe.abschluss && (
+        <Bereich titel="Rückruf">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-2 text-base" suppressHydrationWarning>
+              <CalendarClock className="size-5 text-primary" />
+              {lead.naechste_aktion_am ? (
+                <span className="font-semibold">{rueckrufText(lead.naechste_aktion_am)}</span>
+              ) : (
+                <span className="text-muted-foreground">Kein Rückruf geplant</span>
+              )}
             </p>
             {lead.naechste_aktion_am && (
-              <p className="text-sm font-mono mb-1.5">
-                {new Date(lead.naechste_aktion_am).toLocaleDateString("de-DE", {
-                  timeZone: "Europe/Berlin",
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                })}
-              </p>
+              <Button
+                variant="outline"
+                disabled={laeuft}
+                onClick={() => void ausfuehren(() => rueckrufSetzen(lead.id, null), "Rückruf gelöscht")}
+              >
+                <X /> Löschen
+              </Button>
             )}
-            {!lead.naechste_aktion_am && (
-              <p className="text-sm text-muted-foreground mb-1.5">
-                Keine Wiedervorlage gesetzt
-              </p>
-            )}
-            <Input
-              type="date"
-              value={wiedervorlageDate}
-              onChange={(e) => handleWiedervorlageChange(e.target.value)}
-              disabled={savingWiedervorlage}
-              className="h-8 w-40 text-sm"
-              min={new Date().toISOString().split("T")[0]}
-            />
           </div>
-        </div>
-      </div>
+          {rueckrufModus ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold">
+                {rueckrufModus === "planen" ? "Wann anrufen?" : "Nicht erreicht – wann nochmal anrufen?"}
+              </p>
+              <RueckrufWahl
+                disabled={laeuft}
+                onWahl={async (iso) => {
+                  const ok = await ausfuehren(
+                    () => (rueckrufModus === "planen" ? rueckrufSetzen(lead.id, iso) : nichtErreicht(lead.id, iso)),
+                    `Rückruf ${rueckrufText(iso)} geplant`,
+                  );
+                  if (ok) setRueckrufModus(null);
+                }}
+              />
+              <div className="flex flex-wrap gap-2">
+                {rueckrufModus === "nicht_erreicht" && (
+                  <Button
+                    variant="outline"
+                    disabled={laeuft}
+                    onClick={async () => {
+                      if (await ausfuehren(() => nichtErreicht(lead.id), "Versuch gezählt")) setRueckrufModus(null);
+                    }}
+                  >
+                    Ohne Rückruf speichern
+                  </Button>
+                )}
+                <Button variant="ghost" disabled={laeuft} onClick={() => setRueckrufModus(null)}>
+                  Abbrechen
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" size="lg" className="h-12 rounded-2xl" onClick={() => setRueckrufModus("planen")}>
+                <CalendarClock /> Rückruf planen
+              </Button>
+              <Button variant="outline" size="lg" className="h-12 rounded-2xl" onClick={() => setRueckrufModus("nicht_erreicht")}>
+                <PhoneMissed /> Nicht erreicht
+              </Button>
+            </div>
+          )}
+          {versuche > 0 && (
+            <p className="text-sm text-muted-foreground">
+              Bisher {versuche}× nicht erreicht
+            </p>
+          )}
+        </Bereich>
+      )}
 
-      <Separator />
+      {/* Kontakt */}
+      <Bereich titel="Kontakt">
+        <dl className="space-y-2 text-base">
+          {lead.telefon && (
+            <div className="flex items-center gap-2">
+              <Phone className="size-4 text-muted-foreground" />
+              {tel ? <a href={tel} className="font-semibold text-primary underline-offset-4 hover:underline">{lead.telefon}</a> : lead.telefon}
+            </div>
+          )}
+          {lead.email && (
+            <div className="flex items-center gap-2 break-all">
+              <Mail className="size-4 shrink-0 text-muted-foreground" />
+              <a href={`mailto:${lead.email}`} className="text-primary underline-offset-4 hover:underline">{lead.email}</a>
+            </div>
+          )}
+          {(lead.plz || lead.ort) && (
+            <div className="flex items-center gap-2">
+              <MapPin className="size-4 text-muted-foreground" />
+              {[lead.plz, lead.ort].filter(Boolean).join(" ")}
+            </div>
+          )}
+          <div className="text-sm text-muted-foreground" suppressHydrationWarning>
+            Eingegangen {zeitpunktText(lead.created_at)} · {quelleLabel(lead.quelle)}
+            {lead.first_contact_at && <> · Erster Kontakt {alterText(lead.first_contact_at)}</>}
+          </div>
+        </dl>
+        {personen.length > 1 && (
+          <label className="flex flex-wrap items-center gap-2 pt-1 text-sm">
+            <User className="size-4 text-muted-foreground" />
+            <span className="font-semibold">Zuständig:</span>
+            <select
+              className="h-11 min-w-48 rounded-full border border-input bg-card px-4 text-base"
+              value={lead.assigned_to && personen.some((p) => p.id === lead.assigned_to) ? lead.assigned_to : ""}
+              disabled={laeuft}
+              onChange={(e) => void ausfuehren(() => zustaendigSetzen(lead.id, e.target.value || null), "Zuständigkeit gespeichert")}
+            >
+              <option value="">Niemand</option>
+              {personen.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </Bereich>
 
-      {/* Aktivitätsverlauf */}
-      <div>
-        <h2 className="text-sm font-medium mb-3">Aktivitäten</h2>
-        <ActivityFeed
-          activities={activities}
-          onAddActivity={handleAddActivity}
-        />
-      </div>
+      {/* Anfrage */}
+      <Bereich titel="Anfrage">
+        {lead.anliegen ? <p className="whitespace-pre-wrap text-base">{lead.anliegen}</p> : antworten.length === 0 && <p className="text-muted-foreground">Kein Text zur Anfrage.</p>}
+        {antworten.length > 0 && (
+          <dl className="divide-y rounded-2xl border">
+            {antworten.map((a, i) => (
+              <div key={i} className="space-y-0.5 px-4 py-3">
+                <dt className="text-sm text-muted-foreground">{a.frage}</dt>
+                <dd className="text-base font-semibold whitespace-pre-wrap">{a.antwort || "—"}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {(herkunft.length > 0 || utm.length > 0) && (
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+            {herkunft.map((h) => (
+              <div key={h.label} className="flex gap-2">
+                <dt className="text-muted-foreground">{h.label}:</dt>
+                <dd className="font-medium break-all">{h.wert}</dd>
+              </div>
+            ))}
+            {utm.map(([k, v]) => (
+              <div key={k} className="flex gap-2">
+                <dt className="text-muted-foreground">{k}:</dt>
+                <dd className="font-medium break-all">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {lead.form_payload && Object.keys(lead.form_payload).length > 0 && (
+          <details className="group rounded-2xl bg-muted/60 px-4 py-3 text-sm">
+            <summary className="flex cursor-pointer list-none items-center gap-1 font-semibold text-muted-foreground">
+              <ChevronDown className="size-4 transition group-open:rotate-180" />
+              Technische Daten
+            </summary>
+            <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">
+              {JSON.stringify(lead.form_payload, null, 2)}
+            </pre>
+          </details>
+        )}
+      </Bereich>
+
+      {/* Notiz */}
+      <Bereich titel="Notiz schreiben">
+        <form
+          className="space-y-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!notiz.trim()) return;
+            if (await ausfuehren(() => addLeadActivity(lead.id, { typ: "notiz", inhalt: notiz }), "Notiz gespeichert")) setNotiz("");
+          }}
+        >
+          <Textarea
+            placeholder="z. B. Möchte Angebot bis Freitag, Hund im Garten"
+            value={notiz}
+            onChange={(e) => setNotiz(e.target.value)}
+            rows={3}
+            className="rounded-2xl text-base"
+          />
+          <Button type="submit" size="lg" disabled={laeuft || !notiz.trim()}>
+            <Send /> Speichern
+          </Button>
+        </form>
+      </Bereich>
+
+      {/* Verlauf */}
+      <Bereich titel="Verlauf">
+        <Verlauf aktivitaeten={aktivitaeten} namen={namen} />
+      </Bereich>
+
+      {dialog}
     </div>
+  );
+}
+
+const ICONS: Record<LeadActivityTyp, typeof Phone> = {
+  anruf: Phone,
+  notiz: FileText,
+  status_wechsel: ArrowRightLeft,
+  email: Mail,
+  whatsapp: MessageCircle,
+  nicht_erreicht: PhoneMissed,
+  rueckruf: CalendarClock,
+};
+
+function Verlauf({ aktivitaeten, namen }: { aktivitaeten: LeadActivity[]; namen: Record<string, string> }) {
+  if (aktivitaeten.length === 0) return <p className="text-sm text-muted-foreground">Noch nichts passiert.</p>;
+  return (
+    <ol className="space-y-0">
+      {aktivitaeten.map((a, i) => {
+        const Icon = ICONS[a.typ] ?? FileText;
+        const wechsel = a.typ === "status_wechsel" && a.alt_status && a.neu_status;
+        // Alte Einträge tragen nur „Status geändert …“ – den Text zeigen wir nicht doppelt
+        const zusatz = a.inhalt && !/^Status( geändert)?:/.test(a.inhalt) ? a.inhalt : null;
+        return (
+          <li key={a.id} className={cn("flex gap-3 py-3", i < aktivitaeten.length - 1 && "border-b border-border/60")}>
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
+              <Icon className="size-4 text-muted-foreground" />
+            </span>
+            <div className="min-w-0 flex-1">
+              {wechsel ? (
+                <p className="text-sm font-semibold">
+                  {stufenInfo(stufeVon(a.alt_status!)).label} → {stufenInfo(stufeVon(a.neu_status!)).label}
+                </p>
+              ) : null}
+              {(zusatz || !wechsel) && <p className="text-sm whitespace-pre-wrap">{zusatz ?? a.inhalt ?? ""}</p>}
+              <p className="text-xs text-muted-foreground">
+                {zeitpunktText(a.created_at)}
+                {a.user_id && namen[a.user_id] ? ` · ${namen[a.user_id]}` : ""}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

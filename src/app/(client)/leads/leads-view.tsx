@@ -1,366 +1,301 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LayoutGrid, List, Plus, Search } from "lucide-react";
+import { toast } from "sonner";
 import { KanbanBoard } from "@/components/leads/kanban-board";
-import { LeadList } from "@/components/leads/lead-list";
+import { KeineLeads, LeadList } from "@/components/leads/lead-list";
+import { LeadCard } from "@/components/leads/lead-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { LEAD_STATUS_CONFIG, LEAD_QUELLEN } from "@/lib/lead-utils";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { quelleLabel } from "@/lib/lead-utils";
+import { STUFEN, berlinTagesbeginn, stufeVon, stufenInfo, type Stufe } from "@/lib/crm/logik";
 import { createLead } from "./actions";
-import { LayoutGrid, List, Search, Plus } from "lucide-react";
-import { toast } from "sonner";
-import type { Lead, LeadStatus, LeadQuelle, Company } from "@/lib/types/database";
+import type { Lead, LeadQuelle } from "@/lib/types/database";
 
-type ViewMode = "kanban" | "liste";
+export type StufenFilter = "alle" | "offen" | Stufe;
+type ZeitFilter = "alle" | "heute" | "7" | "30" | "90";
+type Ansicht = "board" | "liste";
 
-interface LeadsViewProps {
-  leads: Lead[];
-  isStaff: boolean;
-  companies?: Pick<Company, "id" | "name">[];
-  userCompanyId?: string | null;
+const ZEIT_FILTER: { value: ZeitFilter; label: string }[] = [
+  { value: "alle", label: "Jederzeit" },
+  { value: "heute", label: "Heute" },
+  { value: "7", label: "Letzte 7 Tage" },
+  { value: "30", label: "Letzte 30 Tage" },
+  { value: "90", label: "Letzte 90 Tage" },
+];
+
+const TABS: { value: StufenFilter; label: string }[] = [
+  { value: "offen", label: "Offen" },
+  ...STUFEN.map((s) => ({ value: s.id as StufenFilter, label: s.kurz })),
+  { value: "alle", label: "Alle" },
+];
+
+function passtStufe(lead: Lead, f: StufenFilter) {
+  const s = stufeVon(lead.status);
+  if (f === "alle") return true;
+  if (f === "offen") return !stufenInfo(s).abschluss;
+  return s === f;
 }
 
-export function LeadsView({ leads, isStaff, companies, userCompanyId }: LeadsViewProps) {
-  const router = useRouter();
-  const [view, setView] = useState<ViewMode>("kanban");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<LeadStatus | "alle">("alle");
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [creating, setCreating] = useState(false);
+const AUSWAHL =
+  "h-11 rounded-full border border-input bg-card px-4 text-sm font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50";
 
-  // Form state
-  const [formData, setFormData] = useState({
-    vorname: "",
-    nachname: "",
-    telefon: "",
-    email: "",
-    plz: "",
-    ort: "",
-    anliegen: "",
-    quelle: "" as LeadQuelle | "",
-    company_id: "",
-  });
+export function LeadsView({
+  leads,
+  namen,
+  startStufe,
+}: {
+  leads: Lead[];
+  namen: Record<string, string>;
+  startStufe: StufenFilter;
+}) {
+  const [ansicht, setAnsicht] = useState<Ansicht>("board");
+  const [suche, setSuche] = useState("");
+  const [stufe, setStufe] = useState<StufenFilter>(startStufe);
+  const [quelle, setQuelle] = useState<string>("alle");
+  const [zeit, setZeit] = useState<ZeitFilter>("alle");
+  const [neuOffen, setNeuOffen] = useState(false);
 
-  const filtered = leads.filter((l) => {
-    // Status filter
-    if (statusFilter !== "alle" && l.status !== statusFilter) {
-      return false;
-    }
-    // Text search
-    if (search) {
-      const term = search.toLowerCase();
-      return (
-        l.vorname.toLowerCase().includes(term) ||
-        l.nachname.toLowerCase().includes(term) ||
-        l.ort?.toLowerCase().includes(term) ||
-        l.telefon?.includes(term) ||
-        l.email?.toLowerCase().includes(term) ||
-        l.anliegen?.toLowerCase().includes(term)
-      );
-    }
-    return true;
-  });
+  const quellen = useMemo(() => Array.from(new Set(leads.map((l) => l.quelle))).sort(), [leads]);
 
-  function resetForm() {
-    setFormData({
-      vorname: "",
-      nachname: "",
-      telefon: "",
-      email: "",
-      plz: "",
-      ort: "",
-      anliegen: "",
-      quelle: "",
-      company_id: "",
+  // Suche, Quelle, Zeitraum (Stufe getrennt, damit Board und Tabs ihre Zahlen zeigen)
+  const grundmenge = useMemo(() => {
+    const term = suche.trim().toLowerCase();
+    const ab =
+      zeit === "alle" ? null : zeit === "heute" ? berlinTagesbeginn(new Date()) : berlinTagesbeginn(new Date(), -(Number(zeit) - 1));
+    return leads.filter((l) => {
+      if (quelle !== "alle" && l.quelle !== quelle) return false;
+      if (ab && new Date(l.created_at) < ab) return false;
+      if (!term) return true;
+      return [l.vorname, l.nachname, `${l.vorname} ${l.nachname}`, l.ort, l.plz, l.telefon, l.email, l.anliegen]
+        .some((f) => f?.toLowerCase().includes(term));
     });
-  }
+  }, [leads, suche, quelle, zeit]);
 
-  async function handleCreateLead() {
-    if (!formData.vorname.trim() || !formData.nachname.trim()) {
-      toast.error("Vorname und Nachname sind Pflichtfelder");
-      return;
-    }
-
-    const companyId = isStaff ? formData.company_id : userCompanyId;
-    if (!companyId) {
-      toast.error("Bitte wähle ein Unternehmen aus");
-      return;
-    }
-
-    setCreating(true);
-    try {
-      const result = await createLead({
-        company_id: companyId,
-        vorname: formData.vorname.trim(),
-        nachname: formData.nachname.trim(),
-        telefon: formData.telefon.trim() || undefined,
-        email: formData.email.trim() || undefined,
-        plz: formData.plz.trim() || undefined,
-        ort: formData.ort.trim() || undefined,
-        anliegen: formData.anliegen.trim() || undefined,
-        quelle: (formData.quelle || undefined) as LeadQuelle | undefined,
-      });
-
-      if (result.error) {
-        toast.error(result.error);
-      } else {
-        toast.success("Lead erfolgreich angelegt");
-        setShowCreateDialog(false);
-        resetForm();
-        router.refresh();
-      }
-    } catch {
-      toast.error("Lead konnte nicht angelegt werden");
-    }
-    setCreating(false);
-  }
+  const gefiltert = grundmenge.filter((l) => passtStufe(l, stufe));
+  const zaehler = (f: StufenFilter) => grundmenge.filter((l) => passtStufe(l, f)).length;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="fern-page-title">Leads</h1>
+          <h1 className="fern-page-title">Anfragen</h1>
           <p className="text-sm text-muted-foreground">
-            {leads.length} Lead{leads.length !== 1 && "s"} gesamt
+            {leads.length} {leads.length === 1 ? "Anfrage" : "Anfragen"} insgesamt
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1 sm:w-56 sm:flex-initial">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Suchen…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-          {/* Status-Filter */}
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => v && setStatusFilter(v as LeadStatus | "alle")}
-          >
-            <SelectTrigger className="h-8 w-40 text-sm" size="sm">
-              <SelectValue placeholder="Alle Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="alle">Alle Status</SelectItem>
-              {Object.entries(LEAD_STATUS_CONFIG).map(([value, config]) => (
-                <SelectItem key={value} value={value}>
-                  {config.label}
-                </SelectItem>
+        <Button size="lg" className="h-12 px-5 text-base" onClick={() => setNeuOffen(true)}>
+          <Plus className="size-5" />
+          <span className="hidden sm:inline">Neue Anfrage</span>
+          <span className="sm:hidden">Neu</span>
+        </Button>
+      </div>
+
+      {/* Suche + Filter */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Name, Ort, Telefon suchen…"
+            value={suche}
+            onChange={(e) => setSuche(e.target.value)}
+            className="h-11 rounded-full pl-10 text-base"
+          />
+        </div>
+        <div className="flex gap-2">
+          {ansicht === "liste" && (
+            <select
+              aria-label="Stufe"
+              className={cn(AUSWAHL, "hidden md:block")}
+              value={stufe}
+              onChange={(e) => setStufe(e.target.value as StufenFilter)}
+            >
+              {TABS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.value === "offen" || t.value === "alle" ? t.label : stufenInfo(t.value).label}
+                </option>
               ))}
-            </SelectContent>
-          </Select>
-          <div className="flex items-center rounded-md border bg-muted p-0.5">
+            </select>
+          )}
+          <select aria-label="Quelle" className={cn(AUSWAHL, "flex-1 md:flex-none")} value={quelle} onChange={(e) => setQuelle(e.target.value)}>
+            <option value="alle">Alle Quellen</option>
+            {quellen.map((q) => (
+              <option key={q} value={q}>
+                {quelleLabel(q)}
+              </option>
+            ))}
+          </select>
+          <select aria-label="Zeitraum" className={cn(AUSWAHL, "flex-1 md:flex-none")} value={zeit} onChange={(e) => setZeit(e.target.value as ZeitFilter)}>
+            {ZEIT_FILTER.map((z) => (
+              <option key={z.value} value={z.value}>
+                {z.label}
+              </option>
+            ))}
+          </select>
+          <div className="hidden items-center rounded-full border bg-muted p-1 md:flex">
             <Button
-              variant={view === "kanban" ? "default" : "ghost"}
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setView("kanban")}
+              variant={ansicht === "board" ? "default" : "ghost"}
+              size="sm"
+              className="h-9"
+              onClick={() => setAnsicht("board")}
+              aria-pressed={ansicht === "board"}
             >
-              <LayoutGrid className="h-3.5 w-3.5" />
+              <LayoutGrid /> Board
             </Button>
             <Button
-              variant={view === "liste" ? "default" : "ghost"}
-              size="icon"
-              className="h-7 w-7"
-              onClick={() => setView("liste")}
+              variant={ansicht === "liste" ? "default" : "ghost"}
+              size="sm"
+              className="h-9"
+              onClick={() => setAnsicht("liste")}
+              aria-pressed={ansicht === "liste"}
             >
-              <List className="h-3.5 w-3.5" />
+              <List /> Liste
             </Button>
           </div>
-          {(isStaff || userCompanyId) && (
-            <Button
-              size="sm"
-              className="h-8"
-              onClick={() => setShowCreateDialog(true)}
-            >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Lead anlegen
-            </Button>
-          )}
         </div>
       </div>
 
-      {view === "kanban" ? (
-        <KanbanBoard leads={filtered} />
-      ) : (
-        <LeadList leads={filtered} />
-      )}
-
-      {/* Lead anlegen Dialog */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Neuen Lead anlegen</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="create-vorname">Vorname *</Label>
-                <Input
-                  id="create-vorname"
-                  placeholder="Vorname"
-                  value={formData.vorname}
-                  onChange={(e) =>
-                    setFormData((p) => ({ ...p, vorname: e.target.value }))
-                  }
-                  autoFocus
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-nachname">Nachname *</Label>
-                <Input
-                  id="create-nachname"
-                  placeholder="Nachname"
-                  value={formData.nachname}
-                  onChange={(e) =>
-                    setFormData((p) => ({ ...p, nachname: e.target.value }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="create-telefon">Telefon</Label>
-                <Input
-                  id="create-telefon"
-                  placeholder="+49…"
-                  value={formData.telefon}
-                  onChange={(e) =>
-                    setFormData((p) => ({ ...p, telefon: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-email">E-Mail</Label>
-                <Input
-                  id="create-email"
-                  type="email"
-                  placeholder="email@beispiel.de"
-                  value={formData.email}
-                  onChange={(e) =>
-                    setFormData((p) => ({ ...p, email: e.target.value }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="create-plz">PLZ</Label>
-                <Input
-                  id="create-plz"
-                  placeholder="12345"
-                  value={formData.plz}
-                  onChange={(e) =>
-                    setFormData((p) => ({ ...p, plz: e.target.value }))
-                  }
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="create-ort">Ort</Label>
-                <Input
-                  id="create-ort"
-                  placeholder="Stadt"
-                  value={formData.ort}
-                  onChange={(e) =>
-                    setFormData((p) => ({ ...p, ort: e.target.value }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="create-anliegen">Anliegen</Label>
-              <Textarea
-                id="create-anliegen"
-                placeholder="Kurze Beschreibung des Anliegens…"
-                value={formData.anliegen}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, anliegen: e.target.value }))
-                }
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Quelle</Label>
-              <Select
-                value={formData.quelle}
-                onValueChange={(v) =>
-                  v && setFormData((p) => ({ ...p, quelle: v as LeadQuelle }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Quelle wählen…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {LEAD_QUELLEN.map((q) => (
-                    <SelectItem key={q.value} value={q.value}>
-                      {q.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isStaff && companies && (
-              <div className="space-y-1.5">
-                <Label>Unternehmen *</Label>
-                <Select
-                  value={formData.company_id}
-                  onValueChange={(v) =>
-                    v && setFormData((p) => ({ ...p, company_id: v }))
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Unternehmen wählen…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {companies.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowCreateDialog(false);
-                resetForm();
-              }}
+      {/* Handy: Stufen-Tabs + Karten */}
+      <div className="space-y-3 md:hidden">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+          {TABS.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setStufe(t.value)}
+              className={cn(
+                "flex h-10 shrink-0 items-center gap-1.5 rounded-full border-2 px-4 text-sm font-semibold",
+                stufe === t.value ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card",
+              )}
             >
-              Abbrechen
-            </Button>
-            <Button onClick={handleCreateLead} disabled={creating}>
-              {creating ? "Wird angelegt…" : "Lead anlegen"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {t.label}
+              <span className={cn("text-xs", stufe === t.value ? "opacity-80" : "text-muted-foreground")}>{zaehler(t.value)}</span>
+            </button>
+          ))}
+        </div>
+        {gefiltert.length === 0 ? (
+          <KeineLeads text="In dieser Stufe ist gerade nichts." />
+        ) : (
+          gefiltert.map((l) => (
+            <LeadCard key={l.id} lead={l} href={`/leads/${l.id}`} mitStufe zustaendig={l.assigned_to ? namen[l.assigned_to] : null} />
+          ))
+        )}
+      </div>
+
+      {/* Desktop: Board oder Liste */}
+      <div className="hidden md:block">
+        {ansicht === "board" ? (
+          <KanbanBoard leads={grundmenge} namen={namen} />
+        ) : (
+          <LeadList leads={gefiltert} namen={namen} />
+        )}
+      </div>
+
+      <NeuerLeadDialog offen={neuOffen} onOffen={setNeuOffen} />
     </div>
+  );
+}
+
+function NeuerLeadDialog({ offen, onOffen }: { offen: boolean; onOffen: (o: boolean) => void }) {
+  const router = useRouter();
+  const [name, setName] = useState("");
+  const [telefon, setTelefon] = useState("");
+  const [anliegen, setAnliegen] = useState("");
+  const [quelle, setQuelle] = useState<LeadQuelle>("manuell");
+  const [laeuft, setLaeuft] = useState(false);
+
+  function leeren() {
+    setName("");
+    setTelefon("");
+    setAnliegen("");
+    setQuelle("manuell");
+  }
+
+  async function speichern() {
+    if (!name.trim()) return toast.error("Bitte den Namen eintragen");
+    if (!telefon.trim()) return toast.error("Bitte die Telefonnummer eintragen");
+    setLaeuft(true);
+    try {
+      const res = await createLead({ name, telefon, anliegen: anliegen || undefined, quelle });
+      if (res.error || !res.data) {
+        toast.error(res.error ?? "Hat nicht geklappt");
+        return;
+      }
+      toast.success("Anfrage angelegt");
+      onOffen(false);
+      leeren();
+      router.push(`/leads/${res.data.id}`);
+    } catch {
+      toast.error("Hat nicht geklappt. Bitte nochmal versuchen.");
+    } finally {
+      setLaeuft(false);
+    }
+  }
+
+  const feld = "h-14 rounded-2xl text-lg";
+  return (
+    <Dialog open={offen} onOpenChange={onOffen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl">Neue Anfrage</DialogTitle>
+          <DialogDescription>Jemand hat angerufen oder wurde empfohlen? Kurz eintragen.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-3 py-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void speichern();
+          }}
+        >
+          <label className="block space-y-1">
+            <span className="text-sm font-semibold">Name</span>
+            <Input autoFocus autoComplete="off" placeholder="Max Mustermann" value={name} onChange={(e) => setName(e.target.value)} className={feld} />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-sm font-semibold">Telefon</span>
+            <Input type="tel" inputMode="tel" placeholder="0151 2345678" value={telefon} onChange={(e) => setTelefon(e.target.value)} className={feld} />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-sm font-semibold">Worum geht es?</span>
+            <Textarea placeholder="z. B. Bad sanieren, ca. 8 m²" value={anliegen} onChange={(e) => setAnliegen(e.target.value)} rows={2} className="rounded-2xl text-base" />
+          </label>
+          <div className="space-y-1">
+            <span className="text-sm font-semibold">Woher?</span>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { value: "manuell", label: "Direkt (Anruf, vor Ort)" },
+                { value: "empfehlung", label: "Empfehlung" },
+              ] as const).map((q) => (
+                <button
+                  key={q.value}
+                  type="button"
+                  onClick={() => setQuelle(q.value)}
+                  className={cn(
+                    "min-h-12 rounded-2xl border-2 px-3 py-2 text-sm font-semibold",
+                    quelle === q.value ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card",
+                  )}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
+        </form>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" size="lg" onClick={() => onOffen(false)} disabled={laeuft}>
+            Abbrechen
+          </Button>
+          <Button size="lg" onClick={() => void speichern()} disabled={laeuft}>
+            {laeuft ? "Speichert…" : "Anfrage speichern"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

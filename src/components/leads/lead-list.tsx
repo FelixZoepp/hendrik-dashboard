@@ -2,89 +2,67 @@
 
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { SlaBadge } from "./sla-badge";
-import { LEAD_STATUS_CONFIG, formatCurrency } from "@/lib/lead-utils";
-import { Phone, Mail, MapPin } from "lucide-react";
+import { formatCurrency, quelleLabel } from "@/lib/lead-utils";
+import { rueckrufText, stufeVon, stufenInfo } from "@/lib/crm/logik";
+import { AlterAmpel } from "@/components/crm/alter-ampel";
+import { AnrufenKnopf } from "@/components/crm/kontakt-knoepfe";
 import type { Lead } from "@/lib/types/database";
 
 interface LeadListProps {
   leads: Lead[];
+  namen?: Record<string, string>;
 }
 
-export function LeadList({ leads }: LeadListProps) {
-  if (leads.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-border bg-card/60 px-4 py-12 text-center">
-        <p className="text-sm font-medium text-foreground">Keine Leads</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Sobald neue Anfragen eingehen, erscheinen sie hier.
-        </p>
-      </div>
-    );
-  }
+/** Tabellen-Liste (Desktop). */
+export function LeadList({ leads, namen }: LeadListProps) {
+  if (leads.length === 0) return <KeineLeads />;
 
   return (
-    <div className="divide-y fern-card">
+    <div className="fern-card divide-y overflow-hidden">
       {leads.map((lead) => {
-        const config = LEAD_STATUS_CONFIG[lead.status];
+        const stufe = stufenInfo(stufeVon(lead.status));
+        const wert = stufe.id === "auftrag" ? lead.auftragswert : lead.angebotswert;
         return (
-          <Link
-            key={lead.id}
-            href={`/leads/${lead.id}`}
-            className="flex items-center gap-3 px-3 py-3 transition-colors hover:bg-accent/50 sm:px-4"
-          >
-            {/* Name + Ort */}
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">
-                {lead.vorname} {lead.nachname}
-              </p>
-              <div className="flex items-center gap-3 mt-0.5">
-                {lead.ort && (
-                  <span className="text-xs text-muted-foreground flex items-center gap-1">
-                    <MapPin className="h-3 w-3" />
-                    {lead.ort}
-                  </span>
-                )}
-                {lead.anliegen && (
-                  <span className="text-xs text-muted-foreground truncate hidden sm:block max-w-48">
-                    {lead.anliegen}
-                  </span>
-                )}
+          <div key={lead.id} className="flex items-center gap-4 px-4 py-3 transition-colors hover:bg-accent/40">
+            <Link href={`/leads/${lead.id}`} className="flex min-w-0 flex-1 items-center gap-4">
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold">
+                  {lead.vorname} {lead.nachname}
+                </p>
+                <p className="truncate text-sm text-muted-foreground">
+                  {[lead.plz && lead.ort ? `${lead.plz} ${lead.ort}` : lead.ort, lead.anliegen].filter(Boolean).join(" · ") || "—"}
+                </p>
               </div>
-            </div>
-
-            {/* SLA */}
-            <SlaBadge
-              createdAt={lead.created_at}
-              firstContactAt={lead.first_contact_at}
-              className="hidden sm:inline-flex"
-            />
-
-            {/* Status */}
-            <span
-              className={cn(
-                "hidden sm:inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap",
-                config.color
-              )}
-            >
-              {config.label}
-            </span>
-
-            {/* Wert */}
-            {lead.auftragswert != null && (
-              <span className="hidden lg:block text-xs font-mono font-medium whitespace-nowrap">
-                {formatCurrency(lead.auftragswert)}
+              <span className={cn("hidden whitespace-nowrap rounded-md px-2 py-0.5 text-xs font-semibold sm:inline", stufe.farbe)}>
+                {stufe.label}
               </span>
-            )}
-
-            {/* Kontakt-Icons */}
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              {lead.telefon && <Phone className="h-3.5 w-3.5" />}
-              {lead.email && <Mail className="h-3.5 w-3.5" />}
+              <span className="hidden w-28 text-xs text-muted-foreground lg:block">{quelleLabel(lead.quelle)}</span>
+              <span className="hidden w-28 text-xs text-muted-foreground xl:block">
+                {lead.assigned_to ? namen?.[lead.assigned_to] ?? "" : ""}
+              </span>
+              <span className="hidden w-32 text-xs lg:block" suppressHydrationWarning>
+                {lead.naechste_aktion_am && !stufe.abschluss ? `Rückruf ${rueckrufText(lead.naechste_aktion_am)}` : ""}
+              </span>
+              <span className="hidden w-24 text-right text-sm font-semibold md:block">
+                {wert != null && (stufe.id === "auftrag" || stufe.id === "angebot") ? formatCurrency(wert) : ""}
+              </span>
+              <AlterAmpel lead={lead} className="w-28 justify-end" />
+            </Link>
+            <div className="w-32 shrink-0 text-right">
+              {!stufe.abschluss && lead.telefon && <AnrufenKnopf leadId={lead.id} telefon={lead.telefon} zumLead />}
             </div>
-          </Link>
+          </div>
         );
       })}
+    </div>
+  );
+}
+
+export function KeineLeads({ text }: { text?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-3xl border-2 border-dashed border-border bg-card/60 px-4 py-12 text-center">
+      <p className="text-base font-semibold">Keine Anfragen</p>
+      <p className="mt-1 text-sm text-muted-foreground">{text ?? "Sobald neue Anfragen eingehen, erscheinen sie hier."}</p>
     </div>
   );
 }
