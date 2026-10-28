@@ -9,7 +9,7 @@ import { Brand } from "./brand";
 import { navGroupsFor, isActivePath } from "./nav-config";
 import { istTeamRolle } from "@/lib/zugriff";
 
-export function Sidebar({ role }: { role: UserRole }) {
+export function Sidebar({ role, umschalter = null }: { role: UserRole; umschalter?: React.ReactNode }) {
   const pathname = usePathname();
   const groups = navGroupsFor(role);
 
@@ -18,7 +18,7 @@ export function Sidebar({ role }: { role: UserRole }) {
       <div className="px-2">
         <Brand />
       </div>
-      <nav className="mt-8 flex-1 space-y-7 overflow-y-auto">
+      <nav className="mt-8 flex-1 space-y-6 overflow-y-auto">
         {groups.map((group) => (
           <div key={group.label}>
             <p className="px-2 text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -54,8 +54,9 @@ export function Sidebar({ role }: { role: UserRole }) {
           </div>
         ))}
       </nav>
+      {umschalter && <div className="mt-6">{umschalter}</div>}
       {istTeamRolle(role) && (
-      <div className="fern-hero mt-6 p-5">
+      <div className="fern-hero mt-4 p-5">
         <span className="flex size-8 items-center justify-center rounded-full bg-white text-primary">
           <RefreshCw className="size-4" />
         </span>

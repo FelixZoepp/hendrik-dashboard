@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Company, Profile, UserRole } from "@/lib/types/database";
-import { ANSICHT_COOKIE, istTeamRolle, istUuid, startseiteFuer, wirksameFirma } from "@/lib/zugriff";
+import { ANSICHT_COOKIE, ROLLEN_ANSICHT_COOKIE, istTeamRolle, istUuid, startseiteFuer, wirksameFirma, wirksameRolle } from "@/lib/zugriff";
 
 /**
  * Wer ist angemeldet und für welche Firma (Handwerksbetrieb) gilt die Anfrage?
@@ -39,7 +39,12 @@ export interface KontextFirma {
 
 export interface Kontext {
   profile: Profile;
+  /** Wirksame Rolle (beim „Als Mitarbeiter ansehen“ eines Admins: sales/fulfillment). */
   rolle: UserRole;
+  /** Rolle laut Profil – nur für den Ansichts-Umschalter, nie für Rechte. */
+  echteRolle: UserRole;
+  /** Admin sieht die Cloud gerade als Sales/Fulfillment. */
+  rollenAnsicht: boolean;
   istTeam: boolean;
   /** Kunde: eigene company_id. Team: Firma aus „Als Kunde ansehen“, sonst null. */
   companyId: string | null;
@@ -78,7 +83,9 @@ export const getKontext = cache(async (): Promise<Kontext | null> => {
   const profile = profil as Profile;
 
   const istTeam = istTeamRolle(profile.role);
-  const cookieWert = istTeam ? (await cookies()).get(ANSICHT_COOKIE)?.value ?? null : null;
+  const keks = await cookies();
+  const rolle = wirksameRolle(profile.role, keks.get(ROLLEN_ANSICHT_COOKIE)?.value) as UserRole;
+  const cookieWert = istTeam ? keks.get(ANSICHT_COOKIE)?.value ?? null : null;
   const gesuchteId = istTeam ? (istUuid(cookieWert) ? cookieWert : null) : profile.company_id;
 
   let firma: KontextFirma | null = null;
@@ -96,7 +103,9 @@ export const getKontext = cache(async (): Promise<Kontext | null> => {
 
   return {
     profile,
-    rolle: profile.role,
+    rolle,
+    echteRolle: profile.role,
+    rollenAnsicht: rolle !== profile.role,
     istTeam,
     companyId: companyId && firma ? companyId : null,
     company: companyId ? firma : null,

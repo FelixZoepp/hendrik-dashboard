@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { NextResponse, type NextRequest } from "next/server";
-import { ANSICHT_COOKIE, entscheideZugriff, istOeffentlicherPfad, type Rolle } from "@/lib/zugriff";
+import { ANSICHT_COOKIE, ROLLEN_ANSICHT_COOKIE, entscheideZugriff, istOeffentlicherPfad, wirksameRolle, type Rolle } from "@/lib/zugriff";
 
 async function ladeProfil(userId: string): Promise<{ rolle: Rolle; aktiv: boolean } | null> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -44,7 +44,11 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const profil = user ? await ladeProfil(user.id) : null;
+  const echtesProfil = user ? await ladeProfil(user.id) : null;
+  const profil = echtesProfil && {
+    ...echtesProfil,
+    rolle: wirksameRolle(echtesProfil.rolle, request.cookies.get(ROLLEN_ANSICHT_COOKIE)?.value),
+  };
   const entscheidung = entscheideZugriff({
     pfad,
     vollerPfad: pfad + request.nextUrl.search,
@@ -67,6 +71,7 @@ export async function proxy(request: NextRequest) {
       await supabase.auth.signOut();
       const ziel = mitCookies(NextResponse.redirect(new URL(entscheidung.ziel, request.url)));
       ziel.cookies.delete(ANSICHT_COOKIE);
+      ziel.cookies.delete(ROLLEN_ANSICHT_COOKIE);
       return ziel;
     }
     case "nicht_angemeldet":

@@ -18,7 +18,15 @@ import { useState } from "react";
 import { Brand } from "./brand";
 import { navGroupsFor, isActivePath } from "./nav-config";
 
-export function MobileNav({ role, glocke = null }: { role: UserRole; glocke?: React.ReactNode }) {
+export function MobileNav({
+  role,
+  glocke = null,
+  umschalter = null,
+}: {
+  role: UserRole;
+  glocke?: React.ReactNode;
+  umschalter?: React.ReactNode;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const items = navGroupsFor(role).flatMap((g) => g.items);
@@ -61,6 +69,7 @@ export function MobileNav({ role, glocke = null }: { role: UserRole; glocke?: Re
                 );
               })}
             </ul>
+            {umschalter && <div className="mt-4">{umschalter}</div>}
             <button
               type="button"
               onClick={() => abmelden()}

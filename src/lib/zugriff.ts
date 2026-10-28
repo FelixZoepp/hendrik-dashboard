@@ -9,6 +9,19 @@ export const KUNDEN_ROLLEN: readonly Rolle[] = ["client_owner", "client_member"]
 export const ANSICHT_COOKIE = "hs_ansicht_kunde";
 export const ANSICHT_MAX_ALTER_SEKUNDEN = 8 * 60 * 60;
 
+/** Name des httpOnly-Cookies „Als Mitarbeiter ansehen“ (Wert = sales | fulfillment). Nur für Admins wirksam. */
+export const ROLLEN_ANSICHT_COOKIE = "hs_ansicht_rolle";
+export const ANSICHT_ROLLEN: readonly Rolle[] = ["sales", "fulfillment"];
+
+/**
+ * Mit welcher Rolle wird die Anfrage behandelt? Ein Admin kann sich die Cloud als
+ * Sales- oder Fulfillment-Mitarbeiter ansehen (nur weniger Rechte, nie mehr).
+ */
+export function wirksameRolle(echteRolle: Rolle, cookieWert: string | null | undefined): Rolle {
+  if (echteRolle !== "admin") return echteRolle;
+  return ANSICHT_ROLLEN.includes(cookieWert as Rolle) ? (cookieWert as Rolle) : echteRolle;
+}
+
 export function istTeamRolle(rolle: string | null | undefined): rolle is Rolle {
   return TEAM_ROLLEN.includes(rolle as Rolle);
 }
@@ -51,6 +64,10 @@ export const KUNDEN_PRAEFIXE: readonly string[] = [
 /** Team-Seiten, die nur bestimmte Team-Rollen sehen dürfen. */
 export const TEAM_PFAD_ROLLEN: Record<string, readonly Rolle[]> = {
   "/team": ["admin"],
+  "/sla": ["admin"],
+  "/marketing": ["admin"],
+  "/sales": ["admin", "sales"],
+  "/fulfillment": ["admin", "fulfillment"],
 };
 
 /** Nur fürs Team, aber kein Seitenbereich (kein Layout, das schützt). */

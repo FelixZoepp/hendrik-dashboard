@@ -8,7 +8,11 @@ export default async function AgencyLayout({
 }) {
   const ctx = await requireTeam();
   return (
-    <AppShell role={ctx.rolle} userName={ctx.profile.full_name || ctx.email || "Team"}>
+    <AppShell
+      role={ctx.rolle}
+      userName={ctx.profile.full_name || ctx.email || "Team"}
+      rollenAnsicht={ctx.rollenAnsicht ? (ctx.rolle === "sales" ? "Sales" : "Fulfillment") : null}
+    >
       {children}
     </AppShell>
   );

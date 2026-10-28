@@ -40,26 +40,39 @@ const KUNDE: UserRole[] = ["client_owner", "client_member"];
 /** Navigation im internen Bereich (src/app/(agency)). */
 export const TEAM_NAV: NavGroup[] = [
   {
-    label: "Menü",
+    label: "Sales",
     items: [
-      { label: "Sales", href: "/sales", icon: BarChart3, roles: ["admin", "sales"] },
+      { label: "Übersicht", href: "/sales", icon: BarChart3, roles: ["admin", "sales"] },
+      { label: "Gespräche", href: "/sales/gespraeche", icon: PhoneCall, roles: ["admin", "sales"] },
+      { label: "Funnels", href: "/sales/funnels", icon: Magnet, roles: ["admin", "sales"] },
+      { label: "Verlustgrund", href: "/sales/verlustgrund", icon: Tag, roles: ["admin", "sales"] },
       { label: "WhatsApp-Bot", href: "/sales/whatsapp", icon: MessageCircle, roles: ["admin", "sales"] },
       { label: "WhatsApp-Chats", href: "/sales/whatsapp/chats", icon: MessagesSquare, roles: ["admin", "sales"] },
-      { label: "Gespräche", href: "/sales/gespraeche", icon: PhoneCall, roles: ["admin", "sales"] },
-      { label: "Verlustgrund", href: "/sales/verlustgrund", icon: Tag, roles: ["admin", "sales"] },
-      { label: "Funnels", href: "/sales/funnels", icon: Magnet, roles: ["admin", "sales"] },
-      { label: "Marketing", href: "/marketing", icon: Megaphone, roles: ["admin"] },
-      { label: "Fulfillment", href: "/fulfillment", icon: FolderKanban, roles: ["admin", "fulfillment"] },
-      { label: "Kunden", href: "/kunden", icon: Building2, roles: TEAM },
-      { label: "Kunden-Auswertung", href: "/kunden/auswertung", icon: ChartNoAxesCombined, roles: TEAM },
-      { label: "Team", href: "/team", icon: Users, roles: ["admin"] },
     ],
   },
   {
-    label: "Allgemein",
+    label: "Marketing",
+    items: [{ label: "Kampagnen & Werbung", href: "/marketing", icon: Megaphone, roles: ["admin"] }],
+  },
+  {
+    label: "Kunden",
     items: [
-      { label: "SOPs", href: "/sops", icon: BookOpen, roles: TEAM },
+      { label: "Kunden", href: "/kunden", icon: Building2, roles: TEAM },
+      { label: "Kunden-Auswertung", href: "/kunden/auswertung", icon: ChartNoAxesCombined, roles: TEAM },
+      { label: "Fulfillment", href: "/fulfillment", icon: FolderKanban, roles: ["admin", "fulfillment"] },
+    ],
+  },
+  {
+    label: "Wissen",
+    items: [
       { label: "Masterclass-Editor", href: "/inhalte/masterclass", icon: GraduationCap, roles: TEAM },
+      { label: "SOPs", href: "/sops", icon: BookOpen, roles: TEAM },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { label: "Team & Zugänge", href: "/team", icon: Users, roles: ["admin"] },
       { label: "Reaktionszeiten", href: "/sla", icon: Timer, roles: ["admin"] },
     ],
   },

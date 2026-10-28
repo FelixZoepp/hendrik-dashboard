@@ -7,6 +7,7 @@ import {
   bereichFuer,
   darfZugangVerwalten,
   entscheideZugriff,
+  wirksameRolle,
   istOeffentlicherPfad,
   sichererZielpfad,
   startseiteFuer,
@@ -115,6 +116,23 @@ test("Team darf Team-Seiten", () => {
 test("/team nur Admin", () => {
   assert.deepEqual(z("/team", admin), { typ: "weiter" });
   assert.deepEqual(z("/team", sales), { typ: "umleiten", ziel: "/sales" });
+});
+test("Bereichsrechte je Team-Rolle", () => {
+  assert.deepEqual(z("/sales/funnels", fulfillment), { typ: "umleiten", ziel: "/fulfillment" });
+  assert.deepEqual(z("/fulfillment", sales), { typ: "umleiten", ziel: "/sales" });
+  assert.deepEqual(z("/marketing", sales), { typ: "umleiten", ziel: "/sales" });
+  assert.deepEqual(z("/sla", fulfillment), { typ: "umleiten", ziel: "/fulfillment" });
+  for (const p of ["/sales", "/fulfillment", "/marketing", "/sla", "/team"]) assert.deepEqual(z(p, admin), { typ: "weiter" }, p);
+});
+test("Rollen-Ansicht nur für Admin, nur weniger Rechte", () => {
+  assert.equal(wirksameRolle("admin", "sales"), "sales");
+  assert.equal(wirksameRolle("admin", "fulfillment"), "fulfillment");
+  assert.equal(wirksameRolle("admin", "client_owner"), "admin");
+  assert.equal(wirksameRolle("admin", "quatsch"), "admin");
+  assert.equal(wirksameRolle("admin", null), "admin");
+  assert.equal(wirksameRolle("sales", "fulfillment"), "sales");
+  assert.equal(wirksameRolle("fulfillment", "sales"), "fulfillment");
+  assert.equal(wirksameRolle("client_owner", "sales"), "client_owner");
 });
 test("Team auf Kundenseite ohne Ansicht → /kunden", () =>
   assert.deepEqual(z("/dashboard", admin), { typ: "umleiten", ziel: "/kunden?hinweis=ansicht" }));
