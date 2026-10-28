@@ -1,4 +1,19 @@
-import type { LeadStatus, SlaAmpel } from "@/lib/types/database";
+import type { LeadQuelle, LeadStatus, SlaAmpel } from "@/lib/types/database";
+
+// Pipeline-Stufen, Ampel, Kennzahlen, wa.me, Rückruf: zentrale Logik in src/lib/crm/logik.ts
+export {
+  STUFEN,
+  stufeVon,
+  stufenInfo,
+  statusFuerStufe,
+  VERLUST_GRUENDE,
+  verlustGrundLabel,
+  speedAmpel,
+  alterText,
+  telLink,
+  waLink,
+} from "@/lib/crm/logik";
+export type { Stufe } from "@/lib/crm/logik";
 
 export const LEAD_STATUS_CONFIG: Record<
   LeadStatus,
@@ -11,12 +26,12 @@ export const LEAD_STATUS_CONFIG: Record<
     order: 1,
   },
   termin_vereinbart: {
-    label: "Termin vereinbart",
+    label: "Termin vor Ort",
     color: "bg-indigo-100 text-indigo-800",
     order: 2,
   },
   vor_ort_termin: {
-    label: "Vor-Ort-Termin",
+    label: "Termin vor Ort",
     color: "bg-violet-100 text-violet-800",
     order: 3,
   },
@@ -26,7 +41,7 @@ export const LEAD_STATUS_CONFIG: Record<
     order: 4,
   },
   gewonnen: {
-    label: "Gewonnen",
+    label: "Auftrag",
     color: "bg-emerald-100 text-emerald-800",
     order: 5,
   },
@@ -58,20 +73,20 @@ export const KANBAN_COLUMNS: LeadStatus[] = [
   "verloren",
 ];
 
-export const VERLUST_GRUENDE = [
-  { value: "zu_teuer", label: "Zu teuer" },
-  { value: "kein_bedarf_mehr", label: "Kein Bedarf mehr" },
-  { value: "anderer_anbieter", label: "Anderer Anbieter" },
-  { value: "nicht_erreicht", label: "Nicht erreicht" },
-  { value: "unpassende_anfrage", label: "Unpassende Anfrage" },
-] as const;
-
 export const LEAD_QUELLEN = [
   { value: "google_ads", label: "Google Ads" },
   { value: "onepage", label: "OnePage" },
   { value: "manuell", label: "Manuell" },
   { value: "empfehlung", label: "Empfehlung" },
-] as const;
+  { value: "perspective", label: "Funnel" },
+  { value: "meta", label: "Facebook/Instagram" },
+  { value: "webhook", label: "Formular" },
+] as const satisfies readonly { value: LeadQuelle; label: string }[];
+
+export function quelleLabel(quelle: LeadQuelle | string | null | undefined): string {
+  if (!quelle) return "Unbekannt";
+  return LEAD_QUELLEN.find((q) => q.value === quelle)?.label ?? quelle;
+}
 
 export function getLeadAge(createdAt: string): {
   label: string;

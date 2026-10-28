@@ -33,14 +33,19 @@ export type LeadActivityTyp =
   | "notiz"
   | "status_wechsel"
   | "email"
-  | "whatsapp";
+  | "whatsapp"
+  // Migration 00015
+  | "nicht_erreicht"
+  | "rueckruf";
 
 export type VerlustGrund =
   | "zu_teuer"
   | "kein_bedarf_mehr"
   | "anderer_anbieter"
   | "nicht_erreicht"
-  | "unpassende_anfrage";
+  | "unpassende_anfrage"
+  // Migration 00015
+  | "sonstiges";
 
 export type SlaAmpel = "gruen" | "gelb" | "rot";
 
@@ -101,6 +106,11 @@ export interface Lead {
   verlust_grund: VerlustGrund | null;
   naechste_aktion_am: string | null;
   updated_at: string;
+  // CRM (Migration 00015)
+  kontakt_versuche: number;
+  verlust_notiz: string | null;
+  /** Nur Transport für den Status-Trigger (wird sofort geleert) */
+  geaendert_von: string | null;
   // Lead-Eingang je Kunde (Migration 00014)
   quelle_id: string | null;
   external_id: string | null;
