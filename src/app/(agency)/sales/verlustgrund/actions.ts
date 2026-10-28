@@ -18,7 +18,7 @@ function zurueck(meldung: string, fehler = false): never {
 }
 
 async function nurFreigeschaltet() {
-  if (!(await istFreigeschaltet())) zurueck("Bitte zuerst mit der Admin-PIN freischalten.", true);
+  if (!(await istFreigeschaltet())) zurueck("Nur für Admin und Sales.", true);
 }
 
 export async function pinAktion(formData: FormData) {

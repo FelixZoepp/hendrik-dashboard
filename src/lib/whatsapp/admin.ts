@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getKontext } from "@/lib/kontext";
 
 /**
  * Schutz der Bot-Schalter im Dashboard (Auth ist im Projekt deaktiviert):
@@ -83,14 +84,10 @@ async function setzeSperreZurueck(): Promise<void> {
   if (error) throw new Error(`PIN-Sperre nicht zurückgesetzt: ${error.message}`);
 }
 
+/** Seit dem Login: Admin und Sales dürfen Schalter, Chats und Gespräche ohne PIN nutzen. */
 export async function istFreigeschaltet(): Promise<boolean> {
-  const key = schluessel();
-  if (!key) return false;
-  const wert = (await cookies()).get(COOKIE)?.value;
-  const [ablaufText, sig] = (wert ?? "").split(".");
-  const ablauf = Number(ablaufText);
-  if (!sig || !Number.isFinite(ablauf) || ablauf * 1000 < Date.now()) return false;
-  return gleich(sig, signiere(ablauf, key));
+  const ctx = await getKontext();
+  return !!ctx && ctx.istTeam && (ctx.rolle === "admin" || ctx.rolle === "sales");
 }
 
 /** PIN prüfen und bei Erfolg das Cookie setzen (nur in Server Actions aufrufen). */

@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CircleAlert, ExternalLink, Lock } from "lucide-react";
+import { CircleAlert, ExternalLink } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { buttonVariants } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { istFreigeschaltet } from "@/lib/whatsapp/admin";
 import { berlinTeile, berlinZeitpunkt, formatDatum, formatUhrzeit } from "@/lib/whatsapp/logik";
@@ -28,9 +27,7 @@ import {
   type GespraechZeile,
   type Phase,
   type Satz,
-  type Status,
-} from "@/lib/gespraeche/logik";
-import { pinAktion } from "../whatsapp/actions";
+  type Status } from "@/lib/gespraeche/logik";
 
 export const metadata: Metadata = { title: "Gespräche" };
 export const dynamic = "force-dynamic";
@@ -213,16 +210,9 @@ export default async function GespraechePage({
         <h1 className="fern-page-title">Gespräche</h1>
         <section className="fern-card max-w-md p-6">
           <p className="mb-4 text-sm text-muted-foreground">
-            Transkripte und Analysen enthalten Kundendaten und sind deshalb mit der Admin-PIN geschützt.
+            Transkripte und Analysen enthalten Kundendaten und sind deshalb nur für Admin und Sales sichtbar.
           </p>
-          <form action={pinAktion} className="flex items-center gap-2">
-            <input type="hidden" name="ziel" value="gespraeche" />
-            <Lock className="size-4 text-muted-foreground" />
-            <Input name="pin" type="password" autoComplete="off" placeholder="Admin-PIN" className="max-w-48" />
-            <Button type="submit" size="sm">
-              Freischalten
-            </Button>
-          </form>
+          <p className="text-sm">Nur für Admin und Sales.</p>
           {fehlerText && <p className="mt-3 text-sm text-destructive">{fehlerText}</p>}
         </section>
       </div>
